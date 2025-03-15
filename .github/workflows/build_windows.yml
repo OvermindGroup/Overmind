@@ -32,8 +32,15 @@ jobs:
 
       - name: Get Tag Name
         id: get_tag_name
-        # run: echo "tag_name=$(git tag --points-at HEAD)" >> $GITHUB_OUTPUT
-        run: echo "tag_name=test-release" >> $GITHUB_OUTPUT
+        shell: pwsh # Explicitly use PowerShell
+        run: |
+          # $tagName = git tag --points-at HEAD
+          # if ($tagName) {
+          #   Write-Output "::set-output name=tag_name::$tagName"
+          # } else {
+          #   Write-Output "::set-output name=tag_name:no-tag"
+          # }
+          Write-Output "::set-output name=tag_name::test-release"
 
       - name: Build Windows
         working-directory: ./src
