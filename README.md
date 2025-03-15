@@ -1,6 +1,6 @@
 # Overmind: AI-Powered Trading Algorithm
 
-![Overmind Logo](src/assets/logos/logo.png)
+![Overmind](src/assets/banners/banner.png)
 
 ## Overview
 
