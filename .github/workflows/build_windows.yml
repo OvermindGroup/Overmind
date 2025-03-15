@@ -30,6 +30,11 @@ jobs:
         working-directory: ./src
         run: flutter pub get
 
+      - name: Get Tag Name
+        id: get_tag_name
+        # run: echo "tag_name=$(git tag --points-at HEAD)" >> $GITHUB_OUTPUT
+        run: echo "tag_name=test-release" >> $GITHUB_OUTPUT
+
       - name: Build Windows
         working-directory: ./src
         run: flutter build windows --release
@@ -37,11 +42,11 @@ jobs:
       - name: Upload Windows Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
+          name: "Overmind-Windows-x64-${{ steps.get_tag_name.outputs.tag_name }}"
           path: ./src/build/windows/x64/runner/Release
           if-no-files-found: error
 
-  release:
+   release:
     needs: build
     runs-on: ubuntu-latest
 
@@ -55,6 +60,45 @@ jobs:
         # run: echo "tag_name=$(git tag --points-at HEAD)" >> $GITHUB_OUTPUT
         run: echo "tag_name=test-release" >> $GITHUB_OUTPUT
 
+      - name: Download Windows Build Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: "Overmind-Windows-x64-${{ steps.get_tag_name.outputs.tag_name }}"
+          path: "Overmind-Windows-x64-${{ steps.get_tag_name.outputs.tag_name }}"
+
+      # - name: Check if Release Exists
+      #   id: check_release
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     TAG_NAME="${{ steps.get_tag_name.outputs.tag_name }}"
+      #     # Use the GitHub API to check if a release with the same tag already exists.
+      #     # This command gets the release ID if the release already exists, or an empty string if it doesn't
+      #     RELEASE_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+      #       -H "Accept: application/vnd.github+json" \
+      #       "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG_NAME}" | jq -r '.id')
+
+      #     if [[ -n "$RELEASE_ID" ]]; then
+      #       echo "::set-output name=release_exists::true"
+      #       echo "::set-output name=release_id::$RELEASE_ID"
+      #       echo "Release with tag '$TAG_NAME' already exists (ID: $RELEASE_ID)."
+      #     else
+      #       echo "::set-output name=release_exists::false"
+      #       echo "Release with tag '$TAG_NAME' does not exist."
+      #     fi
+
+      # - name: Delete Existing Release (if it exists)
+      #   if: steps.check_release.outputs.release_exists == 'true'
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     RELEASE_ID="${{ steps.check_release.outputs.release_id }}"
+      #     echo "Deleting existing release with ID: $RELEASE_ID"
+      #     curl -X DELETE -H "Authorization: token $GITHUB_TOKEN" \
+      #       -H "Accept: application/vnd.github+json" \
+      #       "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
+      #     echo "Existing release deleted."
+
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -67,17 +111,6 @@ jobs:
             Release notes generated automatically.
             See commits for details.
           draft: false
-      - name: Zip Release
-        run: |
-          ls
-          ls src/
-          ls src/build
-          ls src/build/windows
-          ls src/build/windows/x64
-          ls src/build/windows/x64/runner
-          ls src/build/windows/x64/runner/Release
-          cd ./src/build/windows/x64/runner/Release
-          zip -r Overmind-Windows-x64.zip *
 
       - name: Upload Windows Release Asset
         uses: actions/upload-release-asset@v1
@@ -85,6 +118,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./src/build/windows/x64/runner/Release/Overmind-Windows-x64.zip
-          asset_name: Overmind-Windows-x64.zip
+          asset_path: "Overmind-Windows-x64-${{ steps.get_tag_name.outputs.tag_name }}.zip"
+          asset_name: "Overmind-Windows-x64-${{ steps.get_tag_name.outputs.tag_name }}.zip"
           asset_content_type: application/zip
