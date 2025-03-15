@@ -38,7 +38,7 @@ void main() async {
       DeviceOrientation.landscapeLeft,
   ]);
 
-  runApp(Executor());
+  runApp(Overmind());
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     await windowManager.ensureInitialized();
@@ -49,7 +49,7 @@ void main() async {
   }
 }
 
-class Executor extends StatelessWidget {
+class Overmind extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     FullScreenWindow.setFullScreen(true);
