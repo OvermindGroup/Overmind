@@ -27,14 +27,16 @@ jobs:
         run: flutter doctor -v
 
       - name: Install Dependencies
+        working-directory: ./src
         run: flutter pub get
 
       - name: Build Windows
+        working-directory: ./src
         run: flutter build windows --release
 
       - name: Upload Windows Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: ./build/windows/x64/runner/Release
+          path: ./src/build/windows/x64/runner/Release
           if-no-files-found: error
