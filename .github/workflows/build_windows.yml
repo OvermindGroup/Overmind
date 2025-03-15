@@ -2,8 +2,10 @@ name: Build Overmind Windows App
 
 on:
   push:
-    tags:
-      - '*'
+    branches: [ "main" ]
+#  push:
+#    tags:
+#      - '*'
 
 jobs:
   build:
