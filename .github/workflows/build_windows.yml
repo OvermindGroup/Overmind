@@ -69,6 +69,13 @@ jobs:
           draft: false
       - name: Zip Release
         run: |
+          ls
+          ls src/
+          ls src/build
+          ls src/build/windows
+          ls src/build/windows/x64
+          ls src/build/windows/x64/runner
+          ls src/build/windows/x64/runner/Release
           cd ./src/build/windows/x64/runner/Release
           zip -r Overmind-Windows-x64.zip *
 
