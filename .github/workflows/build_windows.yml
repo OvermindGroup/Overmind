@@ -1,6 +1,6 @@
 name: Build Overmind Windows App
 
-# on:
+on:
 #   push:
 #     branches: [ "main" ]
  push:
@@ -34,13 +34,13 @@ jobs:
         id: get_tag_name
         shell: pwsh # Explicitly use PowerShell
         run: |
-          # $tagName = git tag --points-at HEAD
-          # if ($tagName) {
-          #   Write-Output "::set-output name=tag_name::$tagName"
-          # } else {
-          #   Write-Output "::set-output name=tag_name:no-tag"
-          # }
-          Write-Output "::set-output name=tag_name::test-release"
+          $tagName = git tag --points-at HEAD
+          if ($tagName) {
+            Write-Output "::set-output name=tag_name::$tagName"
+          } else {
+            Write-Output "::set-output name=tag_name:no-tag"
+          }
+          # Write-Output "::set-output name=tag_name::test-release"
 
       - name: Build Windows
         working-directory: ./src
