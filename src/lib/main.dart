@@ -177,19 +177,13 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     db = OvermindDb();
     _isSecureStorageAvailable = _checkSecureStorage();
-    _openPositionsNotifier = ValueNotifier({}); // Initialize here
+    _openPositionsNotifier = ValueNotifier({});
     _loadApiKeys().then((_) {
-        _fetchOpenPositions().then((_) {
-            return _updatePortfolio().then((_) {
-                return fetchSymbols().then((_symbols) {
-                    populateChart();
-                    setState(() {
-                        symbols = _symbols;
-                    });
-                    _setNewTpSl(_symbol);
-                });
-            });
-        });
+        if (!_isBinanceApiKeysSet() || !_isOvermindApiKeySet()) {
+          _showApiKeysModal(navigatorKey.currentContext!);
+          return;
+        }
+        _initChart();
     });
     _startPositionsStream();
     // startAutomatedTrading();
@@ -201,11 +195,33 @@ class _HomeScreenState extends State<HomeScreen> {
     fToast.init(navigatorKey.currentContext!);
   }
 
+  void _initChart() {
+    _fetchOpenPositions().then((_) {
+        return _updatePortfolio().then((_) {
+            return fetchSymbols().then((_symbols) {
+                populateChart();
+                setState(() {
+                    symbols = _symbols;
+                });
+                _setNewTpSl(_symbol);
+            });
+        });
+    });
+  }
+
   @override
   void dispose() {
     _positionsStream.cancel();
     _openPositionsNotifier.dispose();
     super.dispose();
+  }
+
+  bool _isBinanceApiKeysSet() {
+    return _binanceApiKey != '' && _binanceApiSecret != '';
+  }
+
+  bool _isOvermindApiKeySet() {
+    return _overmindApiKey != '';
   }
 
   void _startPositionsStream() {
@@ -394,6 +410,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // binance.getUserOpenPositionsWS(_binanceApiKey, _binanceApiSecret).listen((positions) {
     //     _processPositions(positions);
     // });
+    if (!_isBinanceApiKeysSet()) {
+      return;
+    }
     final positions = await binance.getUserOpenPositions(_binanceApiKey, _binanceApiSecret);
     _processPositions(positions);
   }
@@ -733,39 +752,55 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: <Widget>[
                           Text('API Keys',
                             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                          SizedBox(height: 24),
+                          SizedBox(height: 12),
+                          Text(!_isBinanceApiKeysSet() ? 'Please provide your Binance API key and secret' : '',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+                          SizedBox(height: 12),
                           buildTextField('Binance API Key', _binanceApiKeyController),
                           SizedBox(height: 16),
                           buildTextField('Binance API Secret', _binanceApiSecretController),
+                          SizedBox(height: 8),
+                          Text(!_isOvermindApiKeySet() ? 'Please provide your Overmind PRO API key' : '',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+                          SizedBox(height: 8),
+                          buildTextField('Overmind API Key', _overmindApiKeyController),
                           SizedBox(height: 16),
+                          _isOvermindApiKeySet() ? Row() :
                           Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Expanded(
-                                child: buildTextField('Overmind API Key', _overmindApiKeyController),
-                              ),
+                              // Expanded(
+                              //   child: buildTextField('Overmind API Key', _overmindApiKeyController),
+                              // ),
+                              // SizedBox(width: 16),
+                              Text('Or request a free-tier key:',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
                               SizedBox(width: 16),
                               ElevatedButton(
                                 child: Text('Get Free-Tier Key'),
                                 style: ElevatedButton.styleFrom(
+                                  foregroundColor: Colors.white,
                                   backgroundColor: Colors.green,
-                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                  // padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                                 ),
                                 onPressed: () async {
                                   await _getFreeTierKey();
-                                  setState(() {}); // Refresh the UI
+                                  setState(() {});
                                 },
                               ),
                             ],
                           ),
-                          SizedBox(height: 24),
+                          SizedBox(height: 16),
                           ElevatedButton(
-                            child: Text('Save'),
+                            child: Text('Store Securely'),
                             style: ElevatedButton.styleFrom(
+                              foregroundColor: Colors.white,
                               backgroundColor: Colors.blueAccent,
                               padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                             ),
                             onPressed: () async {
                               await _saveApiKeys();
+                              _initChart();
                               Navigator.pop(context);
                             },
                           )

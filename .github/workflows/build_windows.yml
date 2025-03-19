@@ -1,11 +1,11 @@
 name: Build Overmind Windows App
 
-on:
-  push:
-    branches: [ "main" ]
-#  push:
-#    tags:
-#      - '*'
+# on:
+#   push:
+#     branches: [ "main" ]
+ push:
+   tags:
+     - '*'
 
 jobs:
   build_and_release:
