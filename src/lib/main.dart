@@ -24,6 +24,7 @@ import 'widgets/optimization_settings.dart';
 import 'widgets/portfolio.dart';
 import 'services/binance_api.dart';
 import 'services/overmind_api.dart';
+import 'services/update_checker.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 
 GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -132,11 +133,9 @@ class _HomeScreenState extends State<HomeScreen> {
   double _minSlVolPerc = 0.02;
   // double _maxSlVolPerc = 0.0;
   double _tradePercAllocation = 0.20;
-  double _allocationUSDT = 20.0;
-  int _leverage = 1;
   Map<String, double> _latestPrices = {};
   bool _isAutoTrade = false;
-  
+
   late List<CandleData> candles = [];
 
   BinanceApi binance = BinanceApi();
@@ -186,6 +185,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _initChart();
     });
     _startPositionsStream();
+    UpdateChecker().checkForUpdates(navigatorKey.currentContext!);
     // startAutomatedTrading();
 
     super.initState();
@@ -434,7 +434,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return await overmind.getPortfolioFilterBalance(_overmindApiKey, validSymbols, double.parse(balance['availableBalance']) ?? 0.0, positions.length);
   }
 
-  Future<void> _tradeHolding(Holding holding) async {
+  Future<void> _tradeHolding(Holding holding, double allocationUSDT, int leverage) async {
     String symbol = holding.instrument;
     final latestPrice = await overmind.getLatestPrice(_overmindApiKey, symbol);
     final price = latestPrice["close"];
@@ -449,8 +449,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final balance = await binance.getUserBalance(_binanceApiKey, _binanceApiSecret, _quoteSymbol);
     final totalBalance = double.parse(balance["balance"] ?? '0');
     final availableBalance = double.parse(balance["availableBalance"] ?? '0');
-    // final allocationUSDT = ((totalBalance * 0.95) * _tradePercAllocation);
-    final allocationUSDT = _allocationUSDT;
     final allocation = allocationUSDT / price;
     // final allocation = holding.allocation / price;
     final formattedQty = allocation.toStringAsFixed(quantityPrecision);
@@ -463,7 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final side = holding.takeProfit > 0.0 ? "BUY" : "SELL";
     final sideStop = holding.takeProfit > 0.0 ? "SELL" : "BUY";
 
-    await binance.changeLeverage(_binanceApiKey, _binanceApiSecret, symbol, _leverage);
+    await binance.changeLeverage(_binanceApiKey, _binanceApiSecret, symbol, leverage);
     await binance.cancelAllOrders(_binanceApiKey, _binanceApiSecret, symbol).then((resp) async {
         if (resp["code"] != 200) {
           // Something wrong happened, go with next symbol.
@@ -1409,6 +1407,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onUpdateStopLoss: _updateStopLoss,
                   onUpdateBoth: _updateBoth,
                   onClose: _closePosition,
+                  storage: _secureStorage,
                 );
               },
             );
@@ -1657,6 +1656,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         onUpdateStopLoss: _updateStopLoss,
                         onUpdateBoth: _updateBoth,
                         onClose: _closePosition,
+                        storage: _secureStorage,
                       );
                     },
                   );

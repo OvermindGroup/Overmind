@@ -4,6 +4,7 @@ import '../widgets/positions.dart';
 import '../widgets/optimization_settings.dart';
 import 'package:flutter_sizer/flutter_sizer.dart';
 import 'package:collection/collection.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class OptimizedPortfolioDialog extends StatefulWidget {
   final Map<String, double> latestPrices;
@@ -13,7 +14,7 @@ class OptimizedPortfolioDialog extends StatefulWidget {
   final Future<Portfolio> Function() onResetPortfolio;
   final Future<Portfolio> Function(Holding) onTrainModel;
   final Future<Portfolio> Function(Holding) onResetModel;
-  final Future<void> Function(Holding) onTradeHolding;
+  final Future<void> Function(Holding, double, int) onTradeHolding;
   final Function(String) onShowChart;
   final Future<Portfolio> Function() onFetchPortfolio;
   final Function(Portfolio) onUpdatePortfolio;
@@ -26,6 +27,7 @@ class OptimizedPortfolioDialog extends StatefulWidget {
   final Function(BuildContext, String) onUpdateStopLoss;
   final Function(BuildContext, String) onUpdateBoth;
   final Function(BuildContext, String) onClose;
+  final FlutterSecureStorage storage;
 
   const OptimizedPortfolioDialog({
       Key? key,
@@ -49,6 +51,7 @@ class OptimizedPortfolioDialog extends StatefulWidget {
       required this.onUpdateStopLoss,
       required this.onUpdateBoth,
       required this.onClose,
+      required this.storage,
   }) : super(key: key);
 
   @override
@@ -70,6 +73,11 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
   late Future<void> _positionsFuture;
   late Map<String, dynamic> _openPositions;
 
+  final TextEditingController _allocationController = TextEditingController();
+  final TextEditingController _leverageController = TextEditingController();
+  double _allocationUSDT = 0.0;
+  int _leverage = 1;
+
   @override
   void initState() {
     super.initState();
@@ -80,8 +88,53 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
             _searchText = _searchController.text;
         });
     });
+    _loadSettings();
+    _allocationController.addListener(_updateSettings);
+    _leverageController.addListener(_updateSettings);
     // Initialize and fetch initially.
     _fetchOpenPositionsAndUpdateState();
+  }
+
+  Future<void> _loadSettings() async {
+    String? savedAllocation = await widget.storage.read(key: 'allocationUSDT');
+    String? savedLeverage = await widget.storage.read(key: 'leverage');
+    if (savedAllocation != null) {
+      setState(() {
+          _allocationUSDT = double.tryParse(savedAllocation) ?? 0.0;
+          _allocationController.text = _allocationUSDT.toString();
+      });
+    }
+    if (savedLeverage != null) {
+      setState(() {
+          _leverage = int.tryParse(savedLeverage) ?? 0;
+          _leverageController.text = _leverage.toString();
+      });
+    }
+  }
+
+  Future<void> _saveSettings(double value, int leverage) async {
+    await widget.storage.write(key: 'allocationUSDT', value: _allocationUSDT.toString());
+    await widget.storage.write(key: 'leverage', value: _leverage.toString());
+  }
+
+  void _updateSettings() {
+    final allocationUSDT = _allocationController.text;
+    final parsedAllocationUSDT = double.tryParse(allocationUSDT);
+    final leverage = _leverageController.text;
+    final parsedLeverage = int.tryParse(leverage);
+
+    if (parsedAllocationUSDT != null && parsedAllocationUSDT != _allocationUSDT) {
+      setState(() {
+          _allocationUSDT = parsedAllocationUSDT;
+      });
+      _saveSettings(_allocationUSDT, _leverage);
+    }
+    if (parsedLeverage != null && parsedLeverage != _leverage) {
+      setState(() {
+          _leverage = parsedLeverage;
+      });
+      _saveSettings(_allocationUSDT, _leverage);
+    }
   }
 
   Future<void> _fetchOpenPositionsAndUpdateState() async {
@@ -94,6 +147,10 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
 
   @override
   void dispose() {
+    _allocationController.removeListener(_updateSettings);
+    _allocationController.dispose();
+    _leverageController.removeListener(_updateSettings);
+    _leverageController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -169,43 +226,218 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     }
   }
 
-  Widget _buildTrainPortfolioButton() {
-    return TextButton.icon(
-      onPressed: () {
-        _handleTrainPortfolio();
-      },
-      icon: Icon(Icons.fitness_center),
-      label: Text('Train Full Portfolio'),
-      style: ButtonStyle(
-        padding: MaterialStateProperty.all(
-          EdgeInsets.symmetric(vertical: 12, horizontal: 16)),
-        shape: MaterialStateProperty.all(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+  Widget buildLabeledButton({
+      required String labelText,
+      required String buttonText,
+      required IconData icon,
+      required VoidCallback onPressed,
+      Color? buttonColor, // Optional button color
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 1,
+            child: Text(
+              labelText,
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 16,
+              ),
+            ),
           ),
-        ),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton.icon( // Use ElevatedButton for a more prominent look
+              onPressed: onPressed,
+              icon: Icon(icon, color: Colors.white), // White icon for contrast
+              label: Text(
+                buttonText,
+                style: TextStyle(color: Colors.white), // White text for contrast
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: buttonColor ?? Colors.blue, // Use provided color or default to blue
+                padding: EdgeInsets.symmetric(vertical: 14, horizontal: 18), // Slightly larger padding
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12), // More rounded corners
+                ),
+                elevation: 5, // Add a subtle shadow
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildResetPortfolioButton() {
-    return TextButton.icon(
-      onPressed: () {
-        _handleResetPortfolio();
-      },
-      icon: Icon(Icons.delete),
-      label: Text('Reset Full Portfolio'),
-      style: ButtonStyle(
-        padding: MaterialStateProperty.all(
-          EdgeInsets.symmetric(vertical: 12, horizontal: 16)),
-        shape: MaterialStateProperty.all(
-          RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+  Widget _buildTrainingButtons() {
+    return Column(
+      children: [
+        buildLabeledButton(
+          labelText: 'Train Portfolio:',
+          buttonText: 'Train Full Portfolio',
+          icon: Icons.fitness_center,
+          onPressed: () {
+            _handleTrainPortfolio();
+          },
         ),
-      ),
+        buildLabeledButton(
+          labelText: 'Reset Portfolio:',
+          buttonText: 'Reset Full Portfolio',
+          icon: Icons.delete,
+          onPressed: () {
+            _handleResetPortfolio();
+          },
+          buttonColor: Colors.redAccent,
+        ),
+      ],
     );
   }
+
+  // Widget _buildTrainPortfolioButton() {
+  //   return TextButton.icon(
+  //     onPressed: () {
+  //       _handleTrainPortfolio();
+  //     },
+  //     icon: Icon(Icons.fitness_center),
+  //     label: Text('Train Full Portfolio'),
+  //     style: ButtonStyle(
+  //       padding: MaterialStateProperty.all(
+  //         EdgeInsets.symmetric(vertical: 12, horizontal: 16)),
+  //       shape: MaterialStateProperty.all(
+  //         RoundedRectangleBorder(
+  //           borderRadius: BorderRadius.circular(8),
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
+
+  // Widget _buildResetPortfolioButton() {
+  //   return TextButton.icon(
+  //     onPressed: () {
+  //       _handleResetPortfolio();
+  //     },
+  //     icon: Icon(Icons.delete),
+  //     label: Text('Reset Full Portfolio'),
+  //     style: ButtonStyle(
+  //       padding: MaterialStateProperty.all(
+  //         EdgeInsets.symmetric(vertical: 12, horizontal: 16)),
+  //       shape: MaterialStateProperty.all(
+  //         RoundedRectangleBorder(
+  //           borderRadius: BorderRadius.circular(8),
+  //         ),
+  //       ),
+  //     ),
+  //   );
+  // }
+
+  Widget _buildSettingsForm() {
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              flex: 1,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: Text(
+                  'Allocation per trade (USDT):',
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(12.0),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: TextFormField(
+                    controller: _allocationController,
+                    keyboardType: TextInputType.numberWithOptions(decimal: true),
+                    style: TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      border: InputBorder.none, // Remove border inside container
+                      hintStyle: TextStyle(color: Colors.white54),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Required';
+                      }
+                      if (double.tryParse(value) == null) {
+                        return 'Invalid number';
+                      }
+                      return null;
+                    },
+                    onChanged: (value) {
+                      // No need to use onChanged
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 16.0), // Spacing between rows
+
+        Row(
+          children: [
+            Expanded(
+              flex: 1,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: Text(
+                  'Leverage:',
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  borderRadius: BorderRadius.circular(12.0),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                  child: TextFormField(
+                    controller: _leverageController,
+                    keyboardType: TextInputType.numberWithOptions(decimal: false),
+                    style: TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      border: InputBorder.none, // Remove border inside container
+                      hintStyle: TextStyle(color: Colors.white54),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Required';
+                      }
+                      if (int.tryParse(value) == null) {
+                        return 'Invalid number';
+                      }
+                      return null;
+                    },
+                    onChanged: (value) {
+                      // No need to use onChanged
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildContainer(BuildContext context, List<Holding> filteredPortfolio) {
     return Container(
@@ -233,12 +465,16 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
               onUpdateBoth: widget.onUpdateBoth,
               onClose: widget.onClose,
             ),
+            // SizedBox(height: 8),
+            // _buildTrainPortfolioButton(),
+            // SizedBox(height: 8),
+            // _buildResetPortfolioButton(),
+            SizedBox(height: 8),
+            _buildSettingsForm(),
+            SizedBox(height: 8),
+            _buildTrainingButtons(),
             SizedBox(height: 8),
             _buildSearchBar(),
-            SizedBox(height: 8),
-            _buildTrainPortfolioButton(),
-            SizedBox(height: 8),
-            _buildResetPortfolioButton(),
             SizedBox(height: 16),
             _buildPortfolioTable(context, filteredPortfolio),
             SizedBox(height: 24),
@@ -413,67 +649,67 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
   }
 
   DataCell _buildListTradesCell(List<dynamic> revenues) {
-  if (revenues == null || revenues.isEmpty) {
-    return DataCell(Text('No trades', style: TextStyle(color: Colors.grey)));
-  }
-
-  List<List<double>> validRevenues = [];
-  for (var revenue in revenues) {
-    if (revenue is List && revenue.length == 2 && revenue[0] is num && revenue[1] is num) {
-      validRevenues.add([revenue[0].toDouble(), revenue[1].toDouble()]);
-    } else {
-      print('Warning: Invalid revenue type found: $revenue');
-    }
-  }
-
-  if (validRevenues.isEmpty) {
-    return DataCell(Text('No valid trades', style: TextStyle(color: Colors.grey)));
-  }
-
-  List<Widget> bars = [];
-  for (List<double> tradeData in validRevenues) {
-    double revenue = tradeData[0];
-    double direction = tradeData[1];
-
-    Color barColor;
-    double barHeight;
-
-    if (revenue > 0) {
-      barColor = Colors.green;
-    } else if (revenue < 0) {
-      barColor = Colors.red;
-    } else {
-      barColor = Colors.grey;
+    if (revenues == null || revenues.isEmpty) {
+      return DataCell(Text('No trades', style: TextStyle(color: Colors.grey)));
     }
 
-    if (direction > 0) {
-      barHeight = 16.0;
-    } else {
-      barHeight = 8.0;
+    List<List<double>> validRevenues = [];
+    for (var revenue in revenues) {
+      if (revenue is List && revenue.length == 2 && revenue[0] is num && revenue[1] is num) {
+        validRevenues.add([revenue[0].toDouble(), revenue[1].toDouble()]);
+      } else {
+        print('Warning: Invalid revenue type found: $revenue');
+      }
     }
 
-    bars.add(
-      Expanded(
-        flex: 1,
-        child: Container(
-          height: barHeight,
-          width: 5,
-          margin: EdgeInsets.symmetric(horizontal: 0),
-          decoration: BoxDecoration(
-            color: barColor,
-            borderRadius: BorderRadius.circular(2),
+    if (validRevenues.isEmpty) {
+      return DataCell(Text('No valid trades', style: TextStyle(color: Colors.grey)));
+    }
+
+    List<Widget> bars = [];
+    for (List<double> tradeData in validRevenues) {
+      double revenue = tradeData[0];
+      double direction = tradeData[1];
+
+      Color barColor;
+      double barHeight;
+
+      if (revenue > 0) {
+        barColor = Colors.green;
+      } else if (revenue < 0) {
+        barColor = Colors.red;
+      } else {
+        barColor = Colors.grey;
+      }
+
+      if (direction > 0) {
+        barHeight = 16.0;
+      } else {
+        barHeight = 8.0;
+      }
+
+      bars.add(
+        Expanded(
+          flex: 1,
+          child: Container(
+            height: barHeight,
+            width: 5,
+            margin: EdgeInsets.symmetric(horizontal: 0),
+            decoration: BoxDecoration(
+              color: barColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
         ),
+      );
+    }
+
+    return DataCell(
+      Row(
+        children: bars,
       ),
     );
   }
-
-  return DataCell(
-    Row(
-      children: bars,
-    ),
-  );
-}
 
   DataCell _buildPriceCell(double price, String instrument, bool isTakeProfit) {
     final basePrice = widget.latestPrices[instrument] ?? 0.0;
@@ -484,7 +720,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
   }
 
   void _handleTradeAsset(BuildContext context, Holding asset) {
-    widget.onTradeHolding(asset);
+    widget.onTradeHolding(asset, _allocationUSDT, _leverage);
   }
 
   void _handleTrainPortfolio() async {

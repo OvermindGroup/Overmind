@@ -257,17 +257,33 @@ class _PositionsTable extends StatelessWidget {
   final Function(BuildContext, String) onClose;
 
   const _PositionsTable({
-      required this.positions,
-      required this.optimizationSettings,
-      required this.onViewPosition,
-      required this.onUpdateTakeProfit,
-      required this.onUpdateStopLoss,
-      required this.onUpdateBoth,
-      required this.onClose,
+    required this.positions,
+    required this.optimizationSettings,
+    required this.onViewPosition,
+    required this.onUpdateTakeProfit,
+    required this.onUpdateStopLoss,
+    required this.onUpdateBoth,
+    required this.onClose,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (positions.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Center(
+          child: Text(
+            'No open positions to display',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 18,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: ConstrainedBox(
@@ -289,9 +305,6 @@ class _PositionsTable extends StatelessWidget {
       DataColumn(label: Text('TP Filled %', style: TextStyle(color: Colors.white))),
       DataColumn(label: Text('SL Filled %', style: TextStyle(color: Colors.white))),
       DataColumn(label: Text('Profit', style: TextStyle(color: Colors.white))),
-      // DataColumn(label: Text('New Risk Reward', style: TextStyle(color: Colors.white))),
-      // DataColumn(label: Text('New Testing Score', style: TextStyle(color: Colors.white))),
-      // DataColumn(label: Text('New Output Score', style: TextStyle(color: Colors.white))),
       DataColumn(label: Text('Margin', style: TextStyle(color: Colors.white))),
     ];
   }
@@ -304,22 +317,9 @@ class _PositionsTable extends StatelessWidget {
         DataCell(_buildProgressIndicator(position.tpDistance, true)),
         DataCell(_buildProgressIndicator(position.slDistance, false)),
         DataCell(_buildProfitText(position.unrealizedProfit)),
-        // DataCell(_buildScoreText(
-        //   position.riskReward.toStringAsFixed(2),
-        //   position.riskReward <= optimizationSettings.minRiskReward ||
-        //       position.riskReward >= optimizationSettings.maxRiskReward,
-        // )),
-        // DataCell(_buildScoreText(
-        //   position.testingScore.toStringAsFixed(2),
-        //   position.testingScore <= optimizationSettings.minTestingScore,
-        // )),
-        // DataCell(_buildScoreText(
-        //   position.outputScore.toStringAsFixed(2),
-        //   position.outputScore <= optimizationSettings.minOutputScore,
-        // )),
         DataCell(Text(
-            '\$${position.initialMargin.toStringAsFixed(2)}',
-            style: const TextStyle(color: Colors.white),
+          '\$${position.initialMargin.toStringAsFixed(2)}',
+          style: const TextStyle(color: Colors.white),
         )),
       ],
     );
@@ -379,15 +379,6 @@ class _PositionsTable extends StatelessWidget {
       '\$${profit.toStringAsFixed(4)}',
       style: TextStyle(
         color: profit >= 0 ? Colors.green : Colors.red,
-      ),
-    );
-  }
-
-  Widget _buildScoreText(String text, bool isWarning) {
-    return Text(
-      text,
-      style: TextStyle(
-        color: isWarning ? Colors.red : Colors.white,
       ),
     );
   }
