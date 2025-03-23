@@ -1,6 +1,8 @@
 // ignore_for_file: avoid_print
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:io' show Platform, exit;
 import 'package:pluto_menu_bar/pluto_menu_bar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -218,6 +220,16 @@ class _TopMenuBarState extends State<TopMenuBar> {
           } else {
             print('Could not launch $url');
           }
+        },
+      ),
+      PlutoMenuItem(
+        title: 'Exit',
+        onTap: () async {
+          if (Platform.isAndroid) {
+              SystemNavigator.pop();
+            } else if (Platform.isWindows || Platform.isMacOS) {
+              exit(0);
+            }
         },
       ),
     ];
