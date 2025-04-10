@@ -4,6 +4,7 @@ import '../widgets/optimization_settings.dart';
 
 class PositionData {
   final String symbol;
+  final double positionAmt;
   final double unrealizedProfit;
   final double tpDistance;
   final double slDistance;
@@ -14,6 +15,7 @@ class PositionData {
 
   PositionData({
       required this.symbol,
+      required this.positionAmt,
       required this.unrealizedProfit,
       required this.tpDistance,
       required this.slDistance,
@@ -26,6 +28,7 @@ class PositionData {
   factory PositionData.fromJson(Map<String, dynamic> json, Holding optimizedHolding) {
     return PositionData(
       symbol: json['symbol'] as String,
+      positionAmt: json['positionAmt'] as double,
       unrealizedProfit: double.tryParse(json['unRealizedProfit'].toString()) ?? 0.0,
       tpDistance: double.tryParse(json['tpDistance'].toString()) ?? 0.0,
       slDistance: double.tryParse(json['slDistance'].toString()) ?? 0.0,
@@ -318,8 +321,8 @@ class _PositionsTable extends StatelessWidget {
         DataCell(_buildProgressIndicator(position.slDistance, false)),
         DataCell(_buildProfitText(position.unrealizedProfit)),
         DataCell(Text(
-          '\$${position.initialMargin.toStringAsFixed(2)}',
-          style: const TextStyle(color: Colors.white),
+          '${position.positionAmt > 0 ? "+" : "-"}\$${position.initialMargin.toStringAsFixed(2)}',
+          style: position.positionAmt > 0 ? const TextStyle(color: Colors.green) : const TextStyle(color: Colors.red),
         )),
       ],
     );

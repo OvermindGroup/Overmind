@@ -455,7 +455,7 @@ class OvermindApi {
       final http.Response response = await http.get(url, headers: headers);
 
       if (response.statusCode == 200) {
-        await player.play(UrlSource('https://www.wavsource.com/snds_2020-10-01_3728627494378403/sfx/blurp_x.wav'));
+        // await player.play(UrlSource('https://dpoetry.com/test/games/package/files/constructFiles/Files/025832392-magic-idea-05.wav'));
         List<dynamic> jsonResponse = jsonDecode(response.body);
         Portfolio portfolio = Portfolio.fromJson(jsonResponse);
         return portfolio;
@@ -696,6 +696,29 @@ class OvermindApi {
       }
     }
     print('${' ' * indent}}');
+  }
+
+  Future<bool> isTrainInQueue(String apiKey) async {
+    try {
+      final String token = 'Bearer $apiKey';
+      final String endpoint = '/v1/portfolio/train-in-queue';
+      final Uri url = Uri.parse('$baseUrl$endpoint');
+      final Map<String, String> headers = {
+        'Authorization': token,
+      };
+
+      final http.Response response = await http.get(url, headers: headers);
+
+      if (response.statusCode == 200) {
+        Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+        return jsonResponse["inQueue"] as bool ?? false;
+      } else {
+        throw Exception('Failed to check if in training queue');
+      }
+    } catch (error) {
+      print('Error checking if in training queue: $error');
+      return false;
+    }
   }
 
   Future<Portfolio> getPortfolio(String apiKey) async {

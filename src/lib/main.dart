@@ -381,6 +381,7 @@ class _HomeScreenState extends State<HomeScreen> {
         portfolio.add({
             "symbol": symbol,
             "entryPrice": entryPrice,
+            "positionAmt": amount,
             "tpPrice": tpPrice,
             "slPrice": slPrice,
             "tpDistance": tpDistance > 0.0 ? tpDistance / (tpDistance + slDistance) * 100.0 : 0.0,
@@ -574,7 +575,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _newSl = asset.stopLoss;
       });
     }
-    if (_openPositions != null) {
+    if (_openPositions != null && _openPositions.length > 0) {
       for (var asset in _openPositions["portfolio"]) {
         if (symbol == asset["symbol"]) {
           setState(() {
@@ -623,9 +624,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void populateChart() {
-    setState(() {
-        candles = [];
-    });
+    // setState(() {
+    //     candles = [];
+    // });
     fetchCandles().then((value) {
         List<CandleData> _candles = [];
         for (int i = 0; i < value.length; i++) {
@@ -1361,13 +1362,25 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<Portfolio> _handleTrainPortfolio() async {
-    final portfolio = await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0);
-    _showToast("Training Complete");
-    return portfolio;
+    // final portfolio = await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0);
+    // _showToast("Training Complete");
+    // return portfolio;
+    overmind.isTrainInQueue(_overmindApiKey).then((isInQueue) async {
+        if (isInQueue) {
+          _showToast("Already in training queue");
+          return fullOptimizedPortfolio;
+        }
+        await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0);
+    });
+    return fullOptimizedPortfolio;
   }
 
   Future<Portfolio> _handleResetPortfolio() async {
     return await overmind.resetPortfolio(_overmindApiKey);
+  }
+
+  String _getSymbol() {
+    return _symbol;
   }
 
   void _showOptimizedPortfolioDialog(BuildContext context) {
@@ -1408,6 +1421,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onUpdateBoth: _updateBoth,
                   onClose: _closePosition,
                   storage: _secureStorage,
+                  getSymbol: _getSymbol,
                 );
               },
             );
@@ -1657,6 +1671,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         onUpdateBoth: _updateBoth,
                         onClose: _closePosition,
                         storage: _secureStorage,
+                        getSymbol: _getSymbol,
                       );
                     },
                   );
