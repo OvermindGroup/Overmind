@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/overmind_api.dart';
 import '../widgets/positions.dart';
@@ -28,6 +29,7 @@ class OptimizedPortfolioDialog extends StatefulWidget {
   final Function(BuildContext, String) onUpdateBoth;
   final Function(BuildContext, String) onClose;
   final FlutterSecureStorage storage;
+  final String Function() getSymbol;
 
   const OptimizedPortfolioDialog({
       Key? key,
@@ -52,6 +54,7 @@ class OptimizedPortfolioDialog extends StatefulWidget {
       required this.onUpdateBoth,
       required this.onClose,
       required this.storage,
+      required this.getSymbol,
   }) : super(key: key);
 
   @override
@@ -78,6 +81,8 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
   double _allocationUSDT = 0.0;
   int _leverage = 1;
 
+  late StreamSubscription _portfolioStream;
+
   @override
   void initState() {
     super.initState();
@@ -89,6 +94,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
         });
     });
     _loadSettings();
+    _startPortfolioStream();
     _allocationController.addListener(_updateSettings);
     _leverageController.addListener(_updateSettings);
     // Initialize and fetch initially.
@@ -110,6 +116,19 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
           _leverageController.text = _leverage.toString();
       });
     }
+  }
+
+  void _startPortfolioStream() {
+    _portfolioStream = Stream.periodic(const Duration(seconds: 10)).listen((_) {
+        var symbol = widget.getSymbol();
+        setState(() {
+            _portfolioFuture = widget.onFetchPortfolio().then((portfolio) {
+                widget.onUpdatePortfolio(portfolio);
+                _handleShowChart(symbol);
+                return portfolio;
+            });
+        });
+    });
   }
 
   Future<void> _saveSettings(double value, int leverage) async {
@@ -152,6 +171,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     _leverageController.removeListener(_updateSettings);
     _leverageController.dispose();
     _searchController.dispose();
+    _portfolioStream.cancel();
     super.dispose();
   }
 
@@ -191,19 +211,21 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     return FutureBuilder<Portfolio>(
       future: _portfolioFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: _buildLoadingWidget(message: "Processing. Please wait..."));
-        } else if (snapshot.hasError) {
+        // if (snapshot.connectionState == ConnectionState.waiting) {
+        //   return Center(
+        //     child: _buildLoadingWidget(message: "Processing. Please wait..."));
+        // } else
+        if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         } else if (!snapshot.hasData) {
           return Center(child: Text('No Portfolio Data Available'));
         } else {
+          var isWaiting = snapshot.connectionState == ConnectionState.waiting;
           final currentPortfolio = snapshot.data!;
           final filteredPortfolio =
           _filterPortfolio(currentPortfolio, _searchText);
           return SingleChildScrollView(
-            child: _buildContainer(context, filteredPortfolio),
+            child: _buildContainer(context, filteredPortfolio, isWaiting),
           );
         }
       },
@@ -439,7 +461,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
   );
 }
 
-  Widget _buildContainer(BuildContext context, List<Holding> filteredPortfolio) {
+  Widget _buildContainer(BuildContext context, List<Holding> filteredPortfolio, bool isWaiting) {
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -475,7 +497,9 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
             _buildTrainingButtons(),
             SizedBox(height: 8),
             _buildSearchBar(),
-            SizedBox(height: 16),
+            SizedBox(height: 8),
+            isWaiting ? Center(child: _buildLoadingWidget(message: "Updating portfolio. Please wait...")) : SizedBox(height: 16),
+            SizedBox(height: 8),
             _buildPortfolioTable(context, filteredPortfolio),
             SizedBox(height: 24),
           ],
@@ -724,20 +748,22 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
   }
 
   void _handleTrainPortfolio() async {
+    var symbol = widget.getSymbol();
     setState(() {
         _portfolioFuture = widget.onTrainPortfolio().then((portfolio) {
             widget.onUpdatePortfolio(portfolio);
-            _handleShowChart('BTCUSDT');
+            _handleShowChart(symbol);
             return portfolio;
         });
     });
   }
 
   void _handleResetPortfolio() async {
+    var symbol = widget.getSymbol();
     setState(() {
         _portfolioFuture = widget.onResetPortfolio().then((portfolio) {
             widget.onUpdatePortfolio(portfolio);
-            _handleShowChart('BTCUSDT');
+            _handleShowChart(symbol);
             return portfolio;
         });
     });
