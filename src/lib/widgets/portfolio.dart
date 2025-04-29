@@ -195,8 +195,8 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 16),
+          // CircularProgressIndicator(),
+          // SizedBox(height: 16),
           Text(
             message,
             style: TextStyle(fontSize: 16),
@@ -498,7 +498,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
             SizedBox(height: 8),
             _buildSearchBar(),
             SizedBox(height: 8),
-            isWaiting ? Center(child: _buildLoadingWidget(message: "Updating portfolio. Please wait...")) : SizedBox(height: 16),
+            isWaiting ? Center(child: _buildLoadingWidget(message: "Updating portfolio. Please wait...")) : SizedBox(height: 23),
             SizedBox(height: 8),
             _buildPortfolioTable(context, filteredPortfolio),
             SizedBox(height: 24),
