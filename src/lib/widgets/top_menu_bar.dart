@@ -223,6 +223,17 @@ class _TopMenuBarState extends State<TopMenuBar> {
         },
       ),
       PlutoMenuItem(
+        title: 'Report Issue',
+        onTap: () async {
+          const url = 'https://github.com/OvermindGroup/Overmind/issues';
+          if (await canLaunchUrl(Uri.parse(url))) {
+            await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+          } else {
+            print('Could not launch $url');
+          }
+        },
+      ),
+      PlutoMenuItem(
         title: 'Exit',
         onTap: () async {
           if (Platform.isAndroid) {
