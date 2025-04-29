@@ -664,7 +664,7 @@ class OvermindApi {
       }
     } catch (error) {
       print('Error fetching available symbols: $error');
-      return [];
+      throw error;
     }
   }
 
@@ -740,7 +740,7 @@ class OvermindApi {
       }
     } catch (error) {
       print('Error fetching portfolio results: $error');
-      return Portfolio(holdings: []);
+      throw error;
     }
   }
 
@@ -849,7 +849,7 @@ class OvermindApi {
       }
     } catch (error) {
       print('Error fetching Amherag: $error');
-      return {};
+      throw error;
     }
   }
 
@@ -897,7 +897,7 @@ class OvermindApi {
       }
     } catch (error) {
       print('Error fetching latest price: $error');
-      return {};
+      throw error;
     }
   }
 

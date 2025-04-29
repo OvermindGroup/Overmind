@@ -165,6 +165,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _excludedSymbols = {};
 
   late StreamSubscription _positionsStream;
+  late StreamSubscription? _trainingCheckStream;
+  late StreamSubscription? _fetchOvermindDataStream;
 
   OptimizationSettings _optimizationSettings = OptimizationSettings();
 
@@ -195,16 +197,28 @@ class _HomeScreenState extends State<HomeScreen> {
     fToast.init(navigatorKey.currentContext!);
   }
 
+  Future<void> _fetchOvermindData() {
+    try {
+      return _updatePortfolio().then((_) {
+          return fetchSymbols().then((_symbols) {
+              populateChart();
+              setState(() {
+                  symbols = _symbols;
+              });
+              _setNewTpSl(_symbol);
+          });
+      });
+    } catch (error) {
+      print(error);
+      throw error;
+    }
+  }
+
   void _initChart() {
-    _fetchOpenPositions().then((_) {
-        return _updatePortfolio().then((_) {
-            return fetchSymbols().then((_symbols) {
-                populateChart();
-                setState(() {
-                    symbols = _symbols;
-                });
-                _setNewTpSl(_symbol);
-            });
+    _fetchAndProcessPositions().then((_) {
+        _fetchOvermindData().catchError((error) {
+            print(error);
+            _startFetchOvermindDataStream();
         });
     });
   }
@@ -226,12 +240,49 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _startPositionsStream() {
     _positionsStream = Stream.periodic(const Duration(seconds: 10)).listen((_) {
-        _fetchOpenPositions();
+        _fetchAndProcessPositions();
+    });
+  }
+
+  void _stopTrainingCheckStream() {
+    _trainingCheckStream?.cancel();
+    _trainingCheckStream = null;
+    print('Training stream is stopped');
+  }
+
+  Future<void> _startTrainingCheckStream() async {
+    _trainingCheckStream = Stream.periodic(const Duration(seconds: 10)).listen((_) async {
+        bool isInQueue = await overmind.isTrainInQueue(_overmindApiKey);
+        if (!isInQueue) {
+          _stopTrainingCheckStream();
+          await _updatePortfolio();
+          _showToast("Training complete");
+        }
+    });
+  }
+
+  void _stopFetchOvermindDataStream() {
+    _fetchOvermindDataStream?.cancel();
+    _fetchOvermindDataStream = null;
+    print('Fetch Overmind data stream is stopped');
+  }
+
+  Future<void> _startFetchOvermindDataStream() async {
+    const int seconds = 10;
+    _fetchOvermindDataStream = Stream.periodic(const Duration(seconds: seconds)).listen((_) async {
+        try {
+          await _fetchOvermindData();
+          _stopFetchOvermindDataStream();
+          _showToast("Successfully connected to Overmind servers");
+        } catch (e) {
+          _showToast("Couldn't connect to Overmind servers. Retrying in ${seconds} seconds...");
+          print(e);
+        }
     });
   }
 
   Future<void> fetchPositions() async {
-    await _fetchOpenPositions();
+    await _fetchAndProcessPositions();
   }
 
   Future<List<String>> _fetchLastHourLostSymbols() async {
@@ -407,14 +458,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _fetchOpenPositions() async {
-    // binance.getUserOpenPositionsWS(_binanceApiKey, _binanceApiSecret).listen((positions) {
-    //     _processPositions(positions);
-    // });
+  Future<void> _fetchAndProcessPositions({bool awaitProcess = false}) async {
     if (!_isBinanceApiKeysSet()) {
       return;
     }
     final positions = await binance.getUserOpenPositions(_binanceApiKey, _binanceApiSecret);
+    if (awaitProcess) {
+      await _processPositions(positions);
+      return;
+    }
     _processPositions(positions);
   }
 
@@ -509,7 +561,7 @@ class _HomeScreenState extends State<HomeScreen> {
           );
 
           if (marketOrderResponse['status'] == 'NEW' || marketOrderResponse['status'] == 'FILLED') {
-            await _fetchOpenPositions();
+            await _fetchAndProcessPositions(awaitProcess: true);
             final msg = '$symbol: Market order created successfully';
             print(msg);
             _showToast(msg);
@@ -620,7 +672,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<List<String>> fetchSymbols() async {
-    return await overmind.getSymbols(_overmindApiKey);
+    try {
+      return await overmind.getSymbols(_overmindApiKey);
+    } catch (e) {
+      print(e);
+      return [];
+    }
+
   }
 
   void populateChart() {
@@ -925,7 +983,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     msg = 'Something went wrong';
                   }
-                  // _fetchOpenPositions().then((_) {
+                  // _fetchAndProcessPositions().then((_) {
                   //     populateChart();
                   // });
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -941,7 +999,7 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
-    await _fetchOpenPositions();
+    await _fetchAndProcessPositions();
   }
 
   void _updateStopLoss(BuildContext context, String symbol) async {
@@ -969,7 +1027,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   } else {
                     msg = 'Something went wrong';
                   }
-                  // _fetchOpenPositions().then((_) {
+                  // _fetchAndProcessPositions().then((_) {
                   //     populateChart();
                   // });
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -985,7 +1043,7 @@ class _HomeScreenState extends State<HomeScreen> {
         break;
       }
     }
-    await _fetchOpenPositions();
+    await _fetchAndProcessPositions();
   }
 
   void _updateBoth(BuildContext? context, String symbol) async {
@@ -1032,7 +1090,7 @@ class _HomeScreenState extends State<HomeScreen> {
           }
           binance.createTakeProfitOrder(_binanceApiKey, _binanceApiSecret, symbol, side, origQty, formattedTp).then((_) {
               binance.createStopLossOrder(_binanceApiKey, _binanceApiSecret, symbol, side, origQty, formattedSl).then((_) {
-                  // _fetchOpenPositions().then((_) {
+                  // _fetchAndProcessPositions().then((_) {
                   //     populateChart();
                   // });
                   print('Stop orders updated for $symbol, $side, $origQty');
@@ -1049,7 +1107,7 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
     });
-    await _fetchOpenPositions();
+    await _fetchAndProcessPositions();
   }
 
   void _closePosition(BuildContext? context, String symbol) async {
@@ -1070,7 +1128,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _showToast("Something went wrong when trying to close orders for ${symbol}");
         }
     });
-    await _fetchOpenPositions();
+    await _fetchAndProcessPositions();
   }
 
   List<Map<String, dynamic>> _groupAndTransformOrders(List<Map<String, dynamic>> orders) {
@@ -1338,26 +1396,28 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showToast(String message) {
+    fToast.removeCustomToast();
     fToast.showToast(
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+        padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 12.0),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(25.0),
+          borderRadius: BorderRadius.circular(6.0),
           color: Colors.grey[600],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.check, color: Colors.white),
-            SizedBox(
-              width: 30.0,
-            ),
-            Text(message, style: TextStyle(color: Colors.white)),
+            // Icon(Icons.check, color: Colors.white),
+            // SizedBox(
+            //   width: 30.0,
+            // ),
+            Text(message, style: TextStyle(color: Colors.white, fontSize: 24)),
           ],
         ),
       ),
       gravity: ToastGravity.BOTTOM,
-      toastDuration: Duration(seconds: 5),
+      toastDuration: Duration(seconds: 300),
+      isDismissible: true,
     );
   }
 
@@ -1365,12 +1425,16 @@ class _HomeScreenState extends State<HomeScreen> {
     // final portfolio = await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0);
     // _showToast("Training Complete");
     // return portfolio;
+    _showToast("Requesting to train portfolio");
     overmind.isTrainInQueue(_overmindApiKey).then((isInQueue) async {
         if (isInQueue) {
           _showToast("Already in training queue");
           return fullOptimizedPortfolio;
         }
-        await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0);
+        await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0).then((_) {
+            _showToast("Request to train portfolio added to the queue");
+            _startTrainingCheckStream();
+        });
     });
     return fullOptimizedPortfolio;
   }
@@ -1411,7 +1475,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onShowChart: _handleShowChart,
                   onFetchPortfolio: _fetchPortfolio,
                   onUpdatePortfolio: _handleUpdatePortfolio,
-                  fetchOpenPositions: _fetchOpenPositions,
+                  fetchOpenPositions: _fetchAndProcessPositions,
                   openPositions: openPositions,
                   fullOptimizedPortfolio: fullOptimizedPortfolio,
                   optimizationSettings: _optimizationSettings,
@@ -1661,7 +1725,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         onShowChart: _handleShowChart,
                         onFetchPortfolio: _fetchPortfolio,
                         onUpdatePortfolio: _handleUpdatePortfolio,
-                        fetchOpenPositions: _fetchOpenPositions,
+                        fetchOpenPositions: _fetchAndProcessPositions,
                         openPositions: openPositions,
                         fullOptimizedPortfolio: fullOptimizedPortfolio,
                         optimizationSettings: _optimizationSettings,
