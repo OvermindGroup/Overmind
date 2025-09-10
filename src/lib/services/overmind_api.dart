@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:math' show max;
 import 'package:audioplayers/audioplayers.dart';
+import 'package:collection/collection.dart';
 
 final player = AudioPlayer();
 
@@ -12,13 +13,19 @@ class Holding {
   final int horizon;
   final double testingScore;
   final String instrument;
+  final String timeframe;
   final String horizonFormatted;
   final double allocation;
   final double trainingScore;
   final double outputScore;
+  final double outputDelta;
   final List<dynamic> lastTrades;
   final double tpVolPerc;
   final double slVolPerc;
+  final double direction1;
+  final double direction2;
+  final double tpBig;
+  final double tpWithin;
 
   Holding({
       required this.takeProfit,
@@ -27,13 +34,19 @@ class Holding {
       required this.horizon,
       required this.testingScore,
       required this.instrument,
+      required this.timeframe,
       required this.horizonFormatted,
       required this.allocation,
       required this.trainingScore,
       required this.outputScore,
+      required this.outputDelta,
       required this.lastTrades,
       required this.tpVolPerc,
       required this.slVolPerc,
+      required this.direction1,
+      required this.direction2,
+      required this.tpBig,
+      required this.tpWithin,
   });
 
   factory Holding.fromJson(Map<String, dynamic> json) {
@@ -44,13 +57,19 @@ class Holding {
       horizon: json['horizon'].toInt(),
       testingScore: json['testingScore'].toDouble(),
       instrument: json['instrument'],
+      timeframe: json['timeframe'],
       horizonFormatted: json['horizonFormatted'],
       allocation: json['allocation'].toDouble(),
       trainingScore: json['trainingScore'].toDouble(),
       outputScore: json['outputScore'].toDouble(),
+      outputDelta: json['outputDelta'].toDouble(),
       lastTrades: json['lastTrades'].toList() as List<dynamic>,
       tpVolPerc: json['tpVolPerc'].toDouble(),
       slVolPerc: json['slVolPerc'].toDouble(),
+      direction1: json['direction1'].toDouble(),
+      direction2: json['direction2'].toDouble(),
+      tpBig: json['tpBig'].toDouble(),
+      tpWithin: json['tpWithin'].toDouble(),
     );
   }
 }
@@ -89,9 +108,9 @@ class Portfolio {
     return holdings[index];
   }
 
-  Holding getHolding(String instrument) {
+  Holding getHolding(String instrument, String timeframe) {
     return holdings.firstWhere(
-      (holding) => holding.instrument == instrument,
+      (holding) => holding.instrument == instrument && holding.timeframe == timeframe,
       // orElse: () => throw StateError('Instrument $instrument not found in portfolio'),
       orElse: () => Holding(
         takeProfit: 0.0,
@@ -100,13 +119,19 @@ class Portfolio {
         horizon: 0,
         testingScore: 0.0,
         instrument: "",
+        timeframe: "",
         horizonFormatted: "",
         allocation: 0.0,
         trainingScore: 0.0,
         outputScore: 0.0,
+        outputDelta: 0.0,
         lastTrades: [],
         tpVolPerc: 0.0,
         slVolPerc: 0.0,
+        direction1: 0.0,
+        direction2: 0.0,
+        tpBig: 0.0,
+        tpWithin: 0.0,
       ),
       // orElse: () => Holding(),
     );
@@ -187,18 +212,18 @@ class Portfolio {
 
   Portfolio filterTrending(Map<String, List<double>> bounds) {
     List<Holding> filteredHoldings = holdings.where((holding) {
-      List<double>? instrumentBounds = bounds[holding.instrument];
-      if (instrumentBounds == null || instrumentBounds.length != 2) {
-        return false;
-      }
+        List<double>? instrumentBounds = bounds[holding.instrument];
+        if (instrumentBounds == null || instrumentBounds.length != 2) {
+          return false;
+        }
 
-      double lowerBound = instrumentBounds[0];
-      double upperBound = instrumentBounds[1];
+        double lowerBound = instrumentBounds[0];
+        double upperBound = instrumentBounds[1];
 
-      bool isTakeProfitTrending = (holding.takeProfit > lowerBound && holding.takeProfit > upperBound) ||
-                                  (holding.takeProfit < lowerBound && holding.takeProfit < upperBound);
+        bool isTakeProfitTrending = (holding.takeProfit > lowerBound && holding.takeProfit > upperBound) ||
+        (holding.takeProfit < lowerBound && holding.takeProfit < upperBound);
 
-      return isTakeProfitTrending;
+        return isTakeProfitTrending;
     }).toList();
 
     return Portfolio(holdings: filteredHoldings);
@@ -206,152 +231,74 @@ class Portfolio {
 
   Portfolio filterMinTpSl(Map<String, List<double>> bounds, double percentage) {
     List<Holding> filteredHoldings = holdings.where((holding) {
-      List<double>? instrumentBounds = bounds[holding.instrument];
-      if (instrumentBounds == null || instrumentBounds.length != 2) {
-        return false;
-      }
+        List<double>? instrumentBounds = bounds[holding.instrument];
+        if (instrumentBounds == null || instrumentBounds.length != 2) {
+          return false;
+        }
 
-      double lowerBound = instrumentBounds[0];
-      double upperBound = instrumentBounds[1];
+        double lowerBound = instrumentBounds[0];
+        double upperBound = instrumentBounds[1];
 
-      double maxAbsBound = max(lowerBound.abs(), upperBound.abs());
+        double maxAbsBound = max(lowerBound.abs(), upperBound.abs());
 
-      double minThreshold = maxAbsBound * percentage;
+        double minThreshold = maxAbsBound * percentage;
 
-      return holding.takeProfit.abs() > minThreshold && holding.stopLoss.abs() > minThreshold;
+        return holding.takeProfit.abs() > minThreshold && holding.stopLoss.abs() > minThreshold;
     }).toList();
 
     return Portfolio(holdings: filteredHoldings);
   }
 
-  // void filterTop(int n) {
-  //   if (holdings.length <= n) {
-  //     return; // No changes needed
-  //   }
-
-  //   // Use a Priority Queue (Min Heap) to keep track of the smallest n holdings for each score criteria
-  //   final testingHeap = PriorityQueue<Holding>((a, b) => a.testingScore.compareTo(b.testingScore));
-  //   final trainingHeap = PriorityQueue<Holding>((a, b) => a.trainingScore.compareTo(b.trainingScore));
-  //   final outputHeap = PriorityQueue<Holding>((a, b) => a.outputScore.compareTo(b.outputScore));
-
-  //   // Add all holdings to the heaps
-  //   for (final holding in holdings) {
-  //     testingHeap.add(holding);
-  //     trainingHeap.add(holding);
-  //     outputHeap.add(holding);
-  //   }
-
-  //   // Create a Set to hold all the holdings to remove
-  //   final holdingsToRemove = <Holding>{};
-
-  //   print('filterTop start');
-  //   // Remove the lowest scores until we reach n number of holdings
-  //   while (holdings.length > n) {
-  //     if(testingHeap.isNotEmpty) {
-  //       holdingsToRemove.add(testingHeap.removeFirst());
-  //     }
-
-  //     if (holdings.length <= n) break;
-  //      // clear the heap before populating from the next heap
-  //     testingHeap.clear();
-
-  //     if(trainingHeap.isNotEmpty) {
-  //       holdingsToRemove.add(trainingHeap.removeFirst());
-  //     }
-
-  //     if (holdings.length <= n) break;
-  //      // clear the heap before populating from the next heap
-  //     trainingHeap.clear();
-
-  //     if(outputHeap.isNotEmpty) {
-  //       holdingsToRemove.add(outputHeap.removeFirst());
-  //     }
-  //   }
-
-  //   // Update holdings in place
-  //   holdings.removeWhere((holding) => holdingsToRemove.contains(holding));
-
-  // }
-
   void filterTop(int n) {
+    holdings.removeWhere((holding) {
+        if (holding.takeProfit > 0) {
+          return !(holding.direction1 > 0 && holding.direction2 < 0);
+        } else if (holding.takeProfit < 0) {
+          return !(holding.direction1 < 0 && holding.direction2 > 0);
+        }
+        return true;
+    });
+
+    // Then, apply your existing score-based trimming
     while (holdings.length > n) {
-      // Find the holding with the lowest testingScore and remove it
-      Holding? lowestTestingScore = holdings.reduce((a, b) =>
-        a.testingScore < b.testingScore ? a : b);
+      // Remove lowest testingScore
+      Holding? lowestTestingScore = holdings.reduce(
+        (a, b) => a.testingScore < b.testingScore ? a : b,
+      );
       holdings.remove(lowestTestingScore);
 
-      // Check if we still have more than n holdings
       if (holdings.length <= n) break;
 
-      // Find the holding with the lowest trainingScore and remove it
-      Holding? lowestTrainingScore = holdings.reduce((a, b) =>
-        a.trainingScore < b.trainingScore ? a : b);
-      holdings.remove(lowestTrainingScore);
-
-      // Check if we still have more than n holdings
-      if (holdings.length <= n) break;
-
-      // Find the holding with the lowest outputScore and remove it
-      Holding? lowestOutputScore = holdings.reduce((a, b) =>
-        a.outputScore < b.outputScore ? a : b);
+      // Remove lowest outputScore
+      Holding? lowestOutputScore = holdings.reduce(
+        (a, b) => a.outputScore < b.outputScore ? a : b,
+      );
       holdings.remove(lowestOutputScore);
-
-      // Uncomment this section to include the risk reward ratio
-      // Check if we still have more than n holdings
-      // if (holdings.length <= n) break;
-
-      // Find the holding with the lowest risk/reward ratio and remove it
-      // Holding? lowestRiskReward = holdings.reduce((a, b) {
-      //   double riskRewardA = (a.takeProfit / a.stopLoss).isNaN ? 0.0 : (a.takeProfit / a.stopLoss).abs();
-      //   double riskRewardB = (b.takeProfit / b.stopLoss).isNaN ? 0.0 : (b.takeProfit / b.stopLoss).abs();
-
-      //   return riskRewardA < riskRewardB ? a : b;
-      // });
-      // holdings.remove(lowestRiskReward);
     }
   }
 
-  // Portfolio filterTop(int n) {
-  //   // Create a copy of holdings to avoid modifying the original list
-  //   List<Holding> filteredHoldings = List.from(holdings);
+  void filterBest() {
+    holdings.removeWhere((holding) {
+        if (holding.tpBig <= 0.0) {
+          return true;
+        }
+        if (holding.tpWithin <= 0.0) {
+          return true;
+        }
+        bool directionOk;
+        if (holding.takeProfit > 0) {
+          directionOk = holding.direction1 > 0.10 && holding.direction2 < -0.10;
+        } else if (holding.takeProfit < 0) {
+          directionOk = holding.direction1 < -0.10 && holding.direction2 > 0.10;
+        } else {
+          directionOk = false;
+        }
 
-  //   while (filteredHoldings.length > n) {
-  //     // Find the holding with the lowest testingScore and remove it
-  //     Holding? lowestTestingScore = filteredHoldings.reduce((a, b) =>
-  //       a.testingScore < b.testingScore ? a : b);
-  //     filteredHoldings.remove(lowestTestingScore);
+        bool scoreOk = holding.outputScore >= 0.60;
 
-  //     // Check if we still have more than n holdings
-  //     if (filteredHoldings.length <= n) break;
-
-  //     // Find the holding with the lowest trainingScore and remove it
-  //     Holding? lowestTrainingScore = filteredHoldings.reduce((a, b) =>
-  //       a.trainingScore < b.trainingScore ? a : b);
-  //     filteredHoldings.remove(lowestTrainingScore);
-
-  //     // Check if we still have more than n holdings
-  //     if (filteredHoldings.length <= n) break;
-
-  //     // Find the holding with the lowest outputScore and remove it
-  //     Holding? lowestOutputScore = filteredHoldings.reduce((a, b) =>
-  //       a.outputScore < b.outputScore ? a : b);
-  //     filteredHoldings.remove(lowestOutputScore);
-
-  //     // // Check if we still have more than n holdings
-  //     // if (filteredHoldings.length <= n) break;
-
-  //     // // Find the holding with the lowest risk/reward ratio and remove it
-  //     // Holding? lowestRiskReward = filteredHoldings.reduce((a, b) {
-  //     //     double riskRewardA = (a.takeProfit / a.stopLoss).isNaN ? 0.0 : (a.takeProfit / a.stopLoss).abs();
-  //     //     double riskRewardB = (b.takeProfit / b.stopLoss).isNaN ? 0.0 : (b.takeProfit / b.stopLoss).abs();
-
-  //     //     return riskRewardA < riskRewardB ? a : b;
-  //     // });
-  //     // filteredHoldings.remove(lowestRiskReward);
-  //   }
-
-  //   return Portfolio(holdings: filteredHoldings);
-  // }
+        return !(directionOk && scoreOk);
+    });
+  }
 
   Portfolio filterOutSymbols(List<String> symbolsToExclude) {
     List<Holding> filteredHoldings = holdings.where(
@@ -359,6 +306,19 @@ class Portfolio {
     ).toList();
 
     return Portfolio(holdings: filteredHoldings);
+  }
+
+  static List<Holding> sortHoldings(List<Holding> holdings, Map<String, double> rho) {
+    List<({Holding holding, double mean})> holdingMeans = holdings.map((holding) {
+        double rhoValue = rho[holding.instrument] ?? 0.0;
+        // double mean = (rhoValue + holding.outputScore + holding.outputDelta) / 3.0;
+        double mean = (holding.outputScore + holding.outputDelta) / 2.0;
+        return (holding: holding, mean: mean);
+    }).toList();
+
+    holdingMeans.sort((a, b) => b.mean.compareTo(a.mean));
+
+    return holdingMeans.map((e) => e.holding).toList();
   }
 
   @override
@@ -388,6 +348,10 @@ class Portfolio {
       holdings.map((h) => h.outputScore.toStringAsFixed(2).length).reduce(max),
       'Output Score'.length
     );
+    int outputDeltaWidth = max(
+      holdings.map((h) => h.outputDelta.toStringAsFixed(2).length).reduce(max),
+      'Output Delta'.length
+    );
     int testingScoreWidth = max(
       holdings.map((h) => h.testingScore.toStringAsFixed(2).length).reduce(max),
       'Testing Score'.length
@@ -399,7 +363,8 @@ class Portfolio {
     '${' Take Profit '.padRight(profitWidth + 1)}|' +
     '${' Stop Loss '.padRight(lossWidth + 1)}|' +
     '${' Output Score '.padRight(outputScoreWidth + 1)}|' +
-    '${' Testing Score '.padRight(testingScoreWidth + 1)}|';
+    '${' Dir1 '.padRight(outputDeltaWidth + 1)}|' +
+    '${' Dir2 '.padRight(testingScoreWidth + 1)}|';
 
     // Create the separator line
     String separator = '+${'-' * (instrumentWidth + 2)}+' +
@@ -407,6 +372,7 @@ class Portfolio {
     '${'-' * (profitWidth + 2)}+' +
     '${'-' * (lossWidth + 2)}+' +
     '${'-' * (outputScoreWidth + 2)}+' +
+    '${'-' * (outputDeltaWidth + 2)}+' +
     '${'-' * (testingScoreWidth + 2)}+';
 
     // Create the rows
@@ -416,7 +382,8 @@ class Portfolio {
       ' ${holding.takeProfit.toStringAsFixed(8).padLeft(profitWidth)} |' +
       ' ${holding.stopLoss.toStringAsFixed(8).padLeft(lossWidth)} |' +
       ' ${holding.outputScore.toStringAsFixed(2).padLeft(outputScoreWidth)} |' +
-      ' ${holding.testingScore.toStringAsFixed(2).padLeft(testingScoreWidth)} |'
+      ' ${holding.direction1.toStringAsFixed(2).padLeft(outputDeltaWidth)} |' +
+      ' ${holding.direction2.toStringAsFixed(2).padLeft(testingScoreWidth)} |'
     ).toList();
 
     // Combine all parts
@@ -426,8 +393,8 @@ class Portfolio {
 
 class OvermindApi {
   // final String baseUrl = 'http://localhost:1989';
-  final String baseUrl = 'https://overmind.pagekite.me';
-  // final String baseUrl = 'http://172.20.23.250:1989';
+  // final String baseUrl = 'https://overmind.pagekite.me';
+  final String baseUrl = 'http://172.20.23.250:1989';
 
   Future<Portfolio> trainPortfolio(
     String apiKey,
@@ -721,6 +688,41 @@ class OvermindApi {
     }
   }
 
+  Future<Map<String, double>> getRho(String apiKey, List<String> instruments) async {
+    try {
+      final String token = 'Bearer $apiKey';
+      final String endpoint = '/v1/results/rho';
+      final String instrumentsParam = instruments.join(',');
+      final Map<String, String> queryParams = {
+        'instruments': instrumentsParam,
+      };
+      final Uri url = Uri.parse('$baseUrl$endpoint').replace(queryParameters: queryParams);
+      final Map<String, String> headers = {
+        'Authorization': token,
+      };
+      final http.Response response = await http.get(url, headers: headers);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
+        Map<String, double> rhoMap = {};
+        jsonResponse.forEach((key, value) {
+            if (value is num) {
+              rhoMap[key] = value.toDouble();
+            } else {
+              print('Warning: Value for key "$key" is not a number.  Skipping.');
+            }
+        });
+        return rhoMap;
+      } else {
+        print('API Response: ${response.body}');
+        throw Exception('Failed to load rho results: ${response.statusCode}');
+      }
+    } catch (error) {
+      print('Error fetching rho results: $error');
+      throw error;
+    }
+  }
+
   Future<Portfolio> getPortfolio(String apiKey) async {
     try {
       final String token = 'Bearer $apiKey';
@@ -831,10 +833,10 @@ class OvermindApi {
     }
   }
 
-  Future<Map<String, dynamic>> getAmherag(String symbol, String apiKey) async {
+  Future<Map<String, dynamic>> getAmherag(String symbol, String timeframe, String apiKey) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/amherag?instrument=${symbol}';
+      final String endpoint = '/v1/amherag?instrument=${symbol}&timeframe=${timeframe}';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,

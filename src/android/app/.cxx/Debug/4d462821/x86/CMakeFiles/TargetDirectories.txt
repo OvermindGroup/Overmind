@@ -1,0 +1,2 @@
+C:/Users/amher/dev/executor/src/android/app/.cxx/Debug/4d462821/x86/CMakeFiles/edit_cache.dir
+C:/Users/amher/dev/executor/src/android/app/.cxx/Debug/4d462821/x86/CMakeFiles/rebuild_cache.dir

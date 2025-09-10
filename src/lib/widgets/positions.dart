@@ -161,7 +161,7 @@ class _PositionsDialogContentState extends State<_PositionsDialogContent> {
     final positions = (openPositions['portfolio'] as List<dynamic>)
     .map((position) => PositionData.fromJson(
         position,
-        widget.fullOptimizedPortfolio.getHolding(position['symbol']),
+        widget.fullOptimizedPortfolio.getHolding(position['symbol'], '1h'),
     ))
     .toList()
     ..sort((a, b) => b.unrealizedProfit.compareTo(a.unrealizedProfit));

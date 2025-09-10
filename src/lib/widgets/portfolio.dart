@@ -30,6 +30,7 @@ class OptimizedPortfolioDialog extends StatefulWidget {
   final Function(BuildContext, String) onClose;
   final FlutterSecureStorage storage;
   final String Function() getSymbol;
+  final Map<String, double> Function() getRho;
 
   const OptimizedPortfolioDialog({
       Key? key,
@@ -55,6 +56,7 @@ class OptimizedPortfolioDialog extends StatefulWidget {
       required this.onClose,
       required this.storage,
       required this.getSymbol,
+      required this.getRho,
   }) : super(key: key);
 
   @override
@@ -120,10 +122,11 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
 
   void _startPortfolioStream() {
     _portfolioStream = Stream.periodic(const Duration(seconds: 10)).listen((_) {
-        var symbol = widget.getSymbol();
+        // var symbol = widget.getSymbol();
         setState(() {
             _portfolioFuture = widget.onFetchPortfolio().then((portfolio) {
                 widget.onUpdatePortfolio(portfolio);
+                var symbol = widget.getSymbol();
                 _handleShowChart(symbol);
                 return portfolio;
             });
@@ -271,20 +274,20 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
           ),
           Expanded(
             flex: 2,
-            child: ElevatedButton.icon( // Use ElevatedButton for a more prominent look
+            child: ElevatedButton.icon(
               onPressed: onPressed,
-              icon: Icon(icon, color: Colors.white), // White icon for contrast
+              icon: Icon(icon, color: Colors.white),
               label: Text(
                 buttonText,
-                style: TextStyle(color: Colors.white), // White text for contrast
+                style: TextStyle(color: Colors.white),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: buttonColor ?? Colors.blue, // Use provided color or default to blue
-                padding: EdgeInsets.symmetric(vertical: 14, horizontal: 18), // Slightly larger padding
+                backgroundColor: buttonColor ?? Colors.blue,
+                padding: EdgeInsets.symmetric(vertical: 14, horizontal: 18),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12), // More rounded corners
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                elevation: 5, // Add a subtle shadow
+                elevation: 5,
               ),
             ),
           ),
@@ -545,6 +548,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
   }
 
   Widget _buildPortfolioTable(BuildContext context, List<Holding> filteredPortfolio) {
+    final rho = widget.getRho();
     return Center(
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -552,7 +556,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
           showCheckboxColumn: false,
           columnSpacing: 24,
           columns: _buildTableColumns(),
-          rows: _buildTableRows(context, filteredPortfolio),
+          rows: _buildTableRows(context, filteredPortfolio, rho),
         ),
     ));
   }
@@ -561,12 +565,19 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     final columnTitles = [
       'Actions',
       'Asset',
+      'TF',
       // 'Risk Reward',
-      'Training',
+      // 'Training',
       'Testing',
-      'Output',
+      // 'σ',
+      // 'ρ',
       'Last Trades',
+      'μ',
       // 'Allocation (\$)',
+      'Dir1',
+      'Dir2',
+      'TP Big',
+      'TP Within',
       'Take Profit',
       'Stop Loss',
       // 'Hold Duration',
@@ -579,11 +590,15 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     }).toList();
   }
 
-  // widget.openPositions
-
-  List<DataRow> _buildTableRows(BuildContext context, List<Holding> filteredPortfolio) {
+  List<DataRow> _buildTableRows(BuildContext context, List<Holding> filteredPortfolio, Map<String, double> rho) {
+    // filteredPortfolio = Portfolio.sortHoldingsByRho(filteredPortfolio, rho);
+    // if (!rho.isEmpty) {
+    //   filteredPortfolio = Portfolio.sortHoldings(filteredPortfolio, rho);
+    // }
     return filteredPortfolio.map((asset) {
         bool isOpenPosition = widget.openPositions['portfolio'].any((map) => map['symbol'] == asset.instrument);
+        double rhoValue = rho[asset.instrument] ?? 1.0;
+        double fontSize = asset.timeframe == '1h' ? 14.0 : 11.0;
         return DataRow(
           color: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
               if (states.contains(MaterialState.selected)) {
@@ -595,21 +610,34 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
               if (isOpenPosition) {
                 return Colors.lightGreen.withOpacity(0.3); // Color for open positions
               }
+              if (asset.timeframe == '1h') {
+                return Colors.grey.withOpacity(0.2);
+              }
               return null; // Default color, typically transparent
           }),
           cells: [
-            _buildActionCell(context, asset),
-            _buildTextCell(asset.instrument),
+            asset.timeframe == '1h' ? _buildActionCell(context, asset) : DataCell(Row()),
+            _buildTextCell(asset.instrument, fontSize),
+            _buildTextCell(asset.timeframe.toUpperCase(), fontSize),
             // _buildTextCell(asset.riskReward.toStringAsFixed(2)),
-            _buildScoreCell(asset.trainingScore.toStringAsFixed(2), 1.0),
-            _buildScoreCell(asset.testingScore.toStringAsFixed(2), 1.0),
-            _buildScoreCell(asset.outputScore.toStringAsFixed(2), 0.5),
-            _buildListTradesCell(asset.lastTrades),
-            // _buildTextCell('\$${asset.allocation.toStringAsFixed(2)}'),
+            // _buildScoreCell(asset.trainingScore.toStringAsFixed(2), 1.0, fontSize),
+            _buildScoreCell(asset.testingScore.toStringAsFixed(2), 1.0, fontSize),
+            // _buildScoreCell(asset.outputDelta.toStringAsFixed(2), 0.7, fontSize),
+            // _buildScoreCell(rhoValue.toStringAsFixed(2), 0.0),
+            _buildListTradesCell(asset.lastTrades, fontSize),
+            _buildScoreCell(asset.outputScore.toStringAsFixed(2), 0.6, fontSize),
+            _buildDirectionCell(asset.direction1.toStringAsFixed(2),
+              asset.direction1, 0.0, asset.takeProfit * -1,
+              fontSize),
+            _buildDirectionCell(asset.direction2.toStringAsFixed(2),
+              asset.direction2, 0.0, asset.takeProfit,
+              fontSize),
+            _buildDoubleToBool(asset.tpBig, fontSize),
+            _buildDoubleToBool(asset.tpWithin, fontSize),
             _buildPriceCell(asset.takeProfit, asset.instrument,
-              asset.takeProfit > asset.stopLoss ? true : false),
+              asset.takeProfit > asset.stopLoss ? true : false, fontSize),
             _buildPriceCell(asset.stopLoss, asset.instrument,
-              asset.takeProfit > asset.stopLoss ? false : true),
+              asset.takeProfit > asset.stopLoss ? false : true, fontSize),
             // _buildTextCell(asset.horizonFormatted),
           ],
         );
@@ -663,18 +691,23 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     );
   }
 
-  DataCell _buildTextCell(String text) {
-    return DataCell(Text(text, style: TextStyle(color: Colors.white)));
+  DataCell _buildTextCell(String text, double fontSize) {
+    return DataCell(Text(text, style: TextStyle(color: Colors.white, fontSize: fontSize)));
   }
 
-  DataCell _buildScoreCell(String text, double threshold) {
+  DataCell _buildScoreCell(String text, double threshold, double fontSize) {
     final color = double.parse(text) >= threshold ? Colors.white : Colors.red;
-    return DataCell(Text(text, style: TextStyle(color: color)));
+    return DataCell(Text(text, style: TextStyle(color: color, fontSize: fontSize)));
   }
 
-  DataCell _buildListTradesCell(List<dynamic> revenues) {
+  DataCell _buildDirectionCell(String text, double direction, double threshold, double takeProfit, double fontSize) {
+    final color = (direction.abs() >= threshold && direction * takeProfit < 0.0) ? Colors.white : Colors.red;
+    return DataCell(Text(text, style: TextStyle(color: color, fontSize: fontSize)));
+  }
+
+  DataCell _buildListTradesCell(List<dynamic> revenues, double fontSize) {
     if (revenues == null || revenues.isEmpty) {
-      return DataCell(Text('No trades', style: TextStyle(color: Colors.grey)));
+      return DataCell(Text('No trades', style: TextStyle(color: Colors.grey, fontSize: fontSize)));
     }
 
     List<List<double>> validRevenues = [];
@@ -687,7 +720,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     }
 
     if (validRevenues.isEmpty) {
-      return DataCell(Text('No valid trades', style: TextStyle(color: Colors.grey)));
+      return DataCell(Text('No valid trades', style: TextStyle(color: Colors.grey, fontSize: fontSize)));
     }
 
     List<Widget> bars = [];
@@ -735,12 +768,23 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     );
   }
 
-  DataCell _buildPriceCell(double price, String instrument, bool isTakeProfit) {
+  DataCell _buildPriceCell(double price, String instrument, bool isTakeProfit, double fontSize) {
     final basePrice = widget.latestPrices[instrument] ?? 0.0;
     final displayPrice = (price + basePrice).toStringAsFixed(7);
     final color = isTakeProfit ? Colors.green : Colors.red;
 
-    return DataCell(Text(displayPrice, style: TextStyle(color: color)));
+    return DataCell(Text(displayPrice, style: TextStyle(color: color, fontSize: fontSize)));
+  }
+
+  DataCell _buildDoubleToBool(double number, double fontSize) {
+    var text = "True";
+    var color = Colors.white;
+    if (number <= 0.0) {
+      text = "False";
+      color = Colors.red;
+    }
+
+    return DataCell(Text(text, style: TextStyle(color: color, fontSize: fontSize)));
   }
 
   void _handleTradeAsset(BuildContext context, Holding asset) {

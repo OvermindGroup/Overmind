@@ -20,6 +20,8 @@ class PainterParams {
   final double sl;
   final double newTp;
   final double newSl;
+  final double auxTp;
+  final double auxSl;
   final double entryPrice;
   final double lastClose;
 
@@ -47,6 +49,8 @@ class PainterParams {
     required this.sl,
     required this.newTp,
     required this.newSl,
+    required this.auxTp,
+    required this.auxSl,
     required this.entryPrice,
     required this.lastClose,
   });
@@ -106,6 +110,8 @@ class PainterParams {
       sl: b.sl,
       newTp: b.newTp,
       newSl: b.newSl,
+      auxTp: b.auxTp,
+      auxSl: b.auxSl,
       entryPrice: b.entryPrice,
       lastClose: b.lastClose,
       candleWidth: b.candleWidth,

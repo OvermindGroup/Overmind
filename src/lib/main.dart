@@ -26,6 +26,7 @@ import 'services/binance_api.dart';
 import 'services/overmind_api.dart';
 import 'services/update_checker.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 FToast fToast = FToast();
@@ -117,14 +118,18 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _iterations = 50;
   int _maxTradeHorizon = 288;
-  double _takeProfit = 100.0;
-  double _stopLoss = 100.0;
+  double _takeProfit = 05.0;
+  double _stopLoss = 05.0;
   late double _amheragHeight;
   String _symbol = "BTCUSDT";
+  String _timeframe = "1h";
+  String _auxTimeframe = "30m";
   double _tp = 0.0;
   double _sl = 0.0;
   double _newTp = 0.0;
   double _newSl = 0.0;
+  double _auxTp = 0.0;
+  double _auxSl = 0.0;
   double _entryPrice = 0.0;
   int _filterTopN = 10;
 
@@ -134,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // double _maxSlVolPerc = 0.0;
   double _tradePercAllocation = 0.20;
   Map<String, double> _latestPrices = {};
-  bool _isAutoTrade = false;
+  bool _isAutoTrade = true;
 
   late List<CandleData> candles = [];
 
@@ -143,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late Map<String, dynamic> _openPositions = {};
   Map<String, List<double>> userAsset = {};
+  late Map<String, double> _rho = {};
   late Portfolio fullOptimizedPortfolio;
   late Portfolio optimizedPortfolio;
   late Investment? latestInvestment;
@@ -165,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _excludedSymbols = {};
 
   late StreamSubscription _positionsStream;
-  late StreamSubscription? _trainingCheckStream;
+  StreamSubscription? _trainingCheckStream;
   late StreamSubscription? _fetchOvermindDataStream;
 
   OptimizationSettings _optimizationSettings = OptimizationSettings();
@@ -188,13 +194,14 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     _startPositionsStream();
     UpdateChecker().checkForUpdates(navigatorKey.currentContext!);
-    // startAutomatedTrading();
 
     super.initState();
 
     // fToast = FToast();
     // if you want to use context from globally instead of content we need to pass navigatorKey.currentContext!
     fToast.init(navigatorKey.currentContext!);
+
+    startAutomatedTrading();
   }
 
   Future<void> _fetchOvermindData() {
@@ -251,12 +258,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _startTrainingCheckStream() async {
-    _trainingCheckStream = Stream.periodic(const Duration(seconds: 10)).listen((_) async {
+    _trainingCheckStream = Stream.periodic(const Duration(seconds: 2)).listen((_) async {
         bool isInQueue = await overmind.isTrainInQueue(_overmindApiKey);
         if (!isInQueue) {
           _stopTrainingCheckStream();
-          await _updatePortfolio();
+          player.play(UrlSource('https://dpoetry.com/test/games/package/files/constructFiles/Files/025832392-magic-idea-05.wav'));
           _showToast("Training complete");
+          if(_isAutoTrade) {
+            await fetchAndExecutePortfolio();
+          } else {
+            await _updatePortfolio();
+          }
         }
     });
   }
@@ -297,41 +309,45 @@ class _HomeScreenState extends State<HomeScreen> {
     return userTrades.where((trade) => double.parse(trade["realizedPnl"].toString()) < 0).toList().map((trade) => trade["symbol"] as String).toList();
   }
 
-  // Future<void> fetchAndExecutePortfolio() async {
-  //   // Train portfolio
-  //   // await overmind.trainPortfolio(_overmindApiKey, 1, _maxTradeHorizon, _takeProfit / 1.0, _stopLoss / 1.0);
-  //   // Fetch the portfolio
-  //   await _updatePortfolio().then((_) async {
-  //       final symbols = optimizedPortfolio.symbols;
-  //       // Check if symbols has at least one item before executing
-  //       if (symbols.length > 0) {
-  //         await _executePortfolio();
-  //       }
-  //   });
-  // }
+  Future<void> fetchAndExecutePortfolio() async {
+    // Fetch the portfolio
+    await _updatePortfolioAutoTrade().then((_) async {
+        final symbols = optimizedPortfolio.symbols;
+        print('Symbols: $symbols');
+        // Check if symbols has at least one item before executing
+        if (symbols.length > 0) {
+          await _executePortfolio();
+        }
+    });
+  }
 
-  // void startAutomatedTrading() {
-  //   Timer.periodic(Duration(seconds: 90), (Timer timer) async {
-  //       if (_isAutoTrade) {
-  //         await fetchAndExecutePortfolio();
-  //       }
-  //   });
-  // }
+  void startAutomatedTrading() {
+    // Immediately call train, because this is handled by an internal queue.
+    Future.delayed(Duration(seconds: 5)).then((_) {
+        _handleTrainPortfolio();
+    });
+    Timer.periodic(Duration(seconds: 300), (Timer timer) async {
+        _handleTrainPortfolio();
+    });
+  }
 
   Future<Portfolio> _fetchPortfolio() async {
     // final fullPortfolio = await overmind.getPortfolio(_overmindApiKey);
     // var filteredPortfolio = Portfolio(holdings: fullPortfolio.holdings);
-
+    // await _updateRho();
     return overmind.getPortfolio(_overmindApiKey);
   }
 
   Future<Portfolio> _filterPortfolio(Portfolio portfolio) async {
     // final symbols = fullPortfolio.map((holding) => holding.instrument);
 
-    if (_optimizationSettings.filterTopN > 0) {
-      // filteredPortfolio = fullPortfolio.filterTop(_optimizationSettings.filterTopN);
-      portfolio.filterTop(_optimizationSettings.filterTopN);
-    }//  else {
+    portfolio.filterBest();
+
+    // if (_optimizationSettings.filterTopN > 0) {
+    //   // filteredPortfolio = fullPortfolio.filterTop(_optimizationSettings.filterTopN);
+    //   portfolio.filterTop(_optimizationSettings.filterTopN);
+    // }
+    //  else {
     //   filteredPortfolio = fullPortfolio;
     // }
 
@@ -372,10 +388,41 @@ class _HomeScreenState extends State<HomeScreen> {
     return portfolio;
   }
 
+  Future<Map<String, double>> _updateRho() async {
+    List<String> symbols = [];
+    if (_openPositions.isEmpty) {
+      return {};
+    }
+    for (var position in _openPositions["portfolio"]) {
+      symbols.add(position["symbol"]);
+    }
+    if (symbols.length == 0) {
+      return {};
+    }
+    final rho = await overmind.getRho(_overmindApiKey, symbols);
+    setState(() {
+        _rho = rho;
+    });
+    return rho;
+  }
+
+  Future<Portfolio> _updatePortfolioAutoTrade() async {
+    final fullPortfolio = await overmind.getPortfolio(_overmindApiKey);
+    var filteredPortfolio = Portfolio(holdings: fullPortfolio.holdings);
+    filteredPortfolio.filterBest();
+    final latestPrices = await overmind.getLatestPrices(_overmindApiKey, filteredPortfolio.symbols);
+    setState(() {
+        _latestPrices = latestPrices;
+        fullOptimizedPortfolio = fullPortfolio;
+        optimizedPortfolio = filteredPortfolio;
+    });
+    return filteredPortfolio;
+  }
+
   Future<Portfolio> _updatePortfolio() async {
     final fullPortfolio = await overmind.getPortfolio(_overmindApiKey);
     var filteredPortfolio = Portfolio(holdings: fullPortfolio.holdings);
-    await _filterPortfolio(filteredPortfolio);
+    // await _filterPortfolio(filteredPortfolio);
     final latestPrices = await overmind.getLatestPrices(_overmindApiKey, filteredPortfolio.symbols);
     setState(() {
         _latestPrices = latestPrices;
@@ -450,8 +497,17 @@ class _HomeScreenState extends State<HomeScreen> {
         "portfolio": portfolio,
       };
 
+      // _openPositionsNotifier.value = newOpenPositions;
+      // if (!_openPositions.isEmpty && portfolio.length != _openPositions["portfolio"].length) {
+      //   _openPositions = newOpenPositions;
+      //   await _updateRho();
+      // } else {
+      //   _openPositions = newOpenPositions;
+      // }
+
       _openPositionsNotifier.value = newOpenPositions;
       _openPositions = newOpenPositions;
+      // await _updateRho();
     } catch (e){
       print('Error Processing Positions $e');
       // Handle the error accordingly
@@ -562,6 +618,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           if (marketOrderResponse['status'] == 'NEW' || marketOrderResponse['status'] == 'FILLED') {
             await _fetchAndProcessPositions(awaitProcess: true);
+            await _updatePortfolio();
             final msg = '$symbol: Market order created successfully';
             print(msg);
             _showToast(msg);
@@ -590,21 +647,35 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // Future<void> _executePortfolio() async {
-  //   final holdings = optimizedPortfolio.holdings;
-  //   final symbols = optimizedPortfolio.symbols;
-  //   for (String symbol in symbols) {
-  //     final positions = await binance.getUserOpenPositionsBySymbol(_binanceApiKey, _binanceApiSecret, symbol);
-  //     if (positions.length > 0) {
-  //       // This shouldn't happen. If it happens, the portfolio didn't get updated correctly.
-  //       print('Something went wrong in _executePortfolio');
-  //       return;
-  //     }
-  //   }
-  //   for (Holding holding in holdings) {
-  //     await _tradeHolding(holding);
-  //   }
-  // }
+  Future<void> _executePortfolio() async {
+    final holdings = optimizedPortfolio.holdings;
+    // final symbols = optimizedPortfolio.symbols;
+    for (var holding in holdings) {
+      var symbol = holding.instrument;
+      final positions = await binance.getUserOpenPositionsBySymbol(_binanceApiKey, _binanceApiSecret, symbol);
+
+      if (positions.length <= 0) {
+        // No open positions for this symbol
+        try {
+          await _tradeHolding(holding, 25.0, 1);
+        } catch (e) {
+          print('Error trying to trade holding: $e');
+        }
+      }
+
+      // for (Holding holding in holdings) {
+      //   if (!symbols.contains(holding.instrument)) {
+      //     await _tradeHolding(holding);
+      //   }
+      // }
+
+      // if (positions.length > 0) {
+      //   // This shouldn't happen. If it happens, the portfolio didn't get updated correctly.
+      //   print('Something went wrong in _executePortfolio');
+      //   return;
+      // }
+    }
+  }
 
   Future<bool> _checkSecureStorage() async {
     try {
@@ -620,11 +691,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _setNewTpSl(String symbol) {
     final currentSymbol = symbol.substring(0, symbol.length - 4);
-    if (fullOptimizedPortfolio.getHolding(symbol).takeProfit != 0.0) {
-      final asset = fullOptimizedPortfolio.getHolding(symbol);
+    if (fullOptimizedPortfolio.getHolding(symbol, _timeframe).takeProfit != 0.0) {
+      final asset = fullOptimizedPortfolio.getHolding(symbol, _timeframe);
+      final auxAsset = fullOptimizedPortfolio.getHolding(symbol, _auxTimeframe);
+
+      var auxTp = 0.0;
+      var auxSl = 0.0;
+      if (auxAsset.takeProfit != 0.0) {
+        auxTp = auxAsset.takeProfit;
+        auxSl = auxAsset.stopLoss;
+      }
+
       setState(() {
           _newTp = asset.takeProfit;
           _newSl = asset.stopLoss;
+          _auxTp = auxTp;
+          _auxSl = auxSl;
       });
     }
     if (_openPositions != null && _openPositions.length > 0) {
@@ -648,6 +730,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _sl = 0.0;
         _newTp = 0.0;
         _newSl = 0.0;
+        _auxTp = 0.0;
+        _auxSl = 0.0;
         _entryPrice = 0.0;
     });
     _setNewTpSl(symbol);
@@ -717,7 +801,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<List<Map<String, dynamic>>> fetchCandles() async {
-    return overmind.getAmherag(_symbol, _overmindApiKey).then((_candles) {
+    return overmind.getAmherag(_symbol, _timeframe, _overmindApiKey).then((_candles) {
         setState(() {
             _amheragHeight = _candles['height'];
         });
@@ -968,7 +1052,7 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final order in orders) {
       final type = order["type"];
       if(type == "TAKE_PROFIT_MARKET") {
-        final holding = fullOptimizedPortfolio.getHolding(symbol);
+        final holding = fullOptimizedPortfolio.getHolding(symbol, _timeframe);
         final id = order["orderId"].toString();
         final origQty = order["origQty"];
         final side = order["side"];
@@ -1012,7 +1096,7 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final order in orders) {
       final type = order["type"];
       if(type == "STOP_MARKET") {
-        final holding = fullOptimizedPortfolio.getHolding(symbol);
+        final holding = fullOptimizedPortfolio.getHolding(symbol, _timeframe);
         final id = order["orderId"].toString();
         final origQty = order["origQty"];
         final side = order["side"];
@@ -1058,7 +1142,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final numQty = double.parse(position["positionAmt"] ?? '0');
     final origQty = (numQty.abs()).toString();
     final side = numQty > 0 ? "SELL" : "BUY";
-    final holding = fullOptimizedPortfolio.getHolding(symbol);
+    final holding = fullOptimizedPortfolio.getHolding(symbol, _timeframe);
 
     final entryPrice = double.parse(position["entryPrice"]);
     final takeProfit = price + (holding.takeProfit ?? 0.0);
@@ -1384,6 +1468,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _sl = 0.0;
         _newTp = 0.0;
         _newSl = 0.0;
+        _auxTp = 0.0;
+        _auxSl = 0.0;
         _entryPrice = 0.0;
     });
   }
@@ -1422,18 +1508,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<Portfolio> _handleTrainPortfolio() async {
-    // final portfolio = await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0);
-    // _showToast("Training Complete");
-    // return portfolio;
     _showToast("Requesting to train portfolio");
     overmind.isTrainInQueue(_overmindApiKey).then((isInQueue) async {
+        if (_trainingCheckStream == null) {
+          _startTrainingCheckStream();
+        }
         if (isInQueue) {
           _showToast("Already in training queue");
           return fullOptimizedPortfolio;
         }
         await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0).then((_) {
             _showToast("Request to train portfolio added to the queue");
-            _startTrainingCheckStream();
         });
     });
     return fullOptimizedPortfolio;
@@ -1445,6 +1530,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _getSymbol() {
     return _symbol;
+  }
+
+  Map<String, double> _getRho() {
+    return _rho;
   }
 
   void _showOptimizedPortfolioDialog(BuildContext context) {
@@ -1486,6 +1575,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   onClose: _closePosition,
                   storage: _secureStorage,
                   getSymbol: _getSymbol,
+                  getRho: _getRho,
                 );
               },
             );
@@ -1707,7 +1797,8 @@ class _HomeScreenState extends State<HomeScreen> {
         drawer: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             return Drawer(
-              width: constraints.maxWidth * 0.45,
+              width: constraints.maxWidth * 0.55,
+              // width: constraints.maxWidth * 0.75,
               child: StatefulBuilder(
                 builder: (BuildContext context, StateSetter setState) {
                   return ValueListenableBuilder<Map<String, dynamic>>(
@@ -1736,6 +1827,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         onClose: _closePosition,
                         storage: _secureStorage,
                         getSymbol: _getSymbol,
+                        getRho: _getRho,
                       );
                     },
                   );
@@ -1766,6 +1858,8 @@ class _HomeScreenState extends State<HomeScreen> {
               sl: _sl,
               newTp: _newTp,
               newSl: _newSl,
+              auxTp: _auxTp,
+              auxSl: _auxSl,
               entryPrice: _entryPrice,
               lastClose: candles?.last.close ?? 0.0,
             ),

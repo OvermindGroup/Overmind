@@ -32,6 +32,8 @@ class InteractiveChart extends StatefulWidget {
   final double sl;
   final double newTp;
   final double newSl;
+  final double auxTp;
+  final double auxSl;
   final double entryPrice;
   final double lastClose;
 
@@ -77,6 +79,8 @@ class InteractiveChart extends StatefulWidget {
     required this.sl,
     required this.newTp,
     required this.newSl,
+    required this.auxTp,
+    required this.auxSl,
     required this.entryPrice,
     required this.lastClose,
     this.initialVisibleCandleCount = 90,
@@ -197,6 +201,8 @@ class _InteractiveChartState extends State<InteractiveChart> {
               sl: widget.sl,
               newTp: widget.newTp,
               newSl: widget.newSl,
+              auxTp: widget.auxTp,
+              auxSl: widget.auxSl,
               entryPrice: widget.entryPrice,
               lastClose: widget.lastClose,
               xShift: xShift,

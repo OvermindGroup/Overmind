@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-// optimization_settings_model.dart
 class OptimizationSettings {
   int filterTopN;
   String selectedMarketType;

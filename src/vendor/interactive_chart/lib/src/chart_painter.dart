@@ -295,6 +295,8 @@ class ChartPainter extends CustomPainter {
     final sl = params.sl;
     final newTp = params.newTp;
     final newSl = params.newSl;
+    final auxTp = params.auxTp;
+    final auxSl = params.auxSl;
     final entryPrice = params.entryPrice;
     final lastClose = params.lastClose;
     final theme = 'Hellfire';
@@ -379,14 +381,30 @@ class ChartPainter extends CustomPainter {
         Offset(x + thinWidth, params.fitPrice(lastClose! + newTp)),
         Offset(x - thinWidth, params.fitPrice(lastClose! + newTp)),
         Paint()
-        ..strokeWidth = 3.0
+        ..strokeWidth = 4.0
         ..color = lineColors["takeProfit"]!,
       );
       canvas.drawLine(
         Offset(x + thinWidth, params.fitPrice(lastClose! + newSl)),
         Offset(x - thinWidth, params.fitPrice(lastClose! + newSl)),
         Paint()
-        ..strokeWidth = 3.0
+        ..strokeWidth = 4.0
+        ..color = lineColors["stopLoss"]!,
+      );
+    }
+    if (auxTp != 0.0 && auxSl != 0.0) {
+      canvas.drawLine(
+        Offset(x + thinWidth, params.fitPrice(lastClose! + auxTp)),
+        Offset(x - thinWidth, params.fitPrice(lastClose! + auxTp)),
+        Paint()
+        ..strokeWidth = 2.0
+        ..color = lineColors["takeProfit"]!,
+      );
+      canvas.drawLine(
+        Offset(x + thinWidth, params.fitPrice(lastClose! + auxSl)),
+        Offset(x - thinWidth, params.fitPrice(lastClose! + auxSl)),
+        Paint()
+        ..strokeWidth = 2.0
         ..color = lineColors["stopLoss"]!,
       );
     }

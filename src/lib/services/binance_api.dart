@@ -115,7 +115,7 @@ class BinanceApi {
         final quoteBalance = balances.where((elt) => elt["asset"] == quoteSymbol).toList().first;
         return quoteBalance;
       } else {
-        throw Exception('Failed to fetch user balance');
+        throw Exception('Failed to fetch user balance ${response.body}');
       }
     } catch (error) {
       print('Error fetching user balance: $error');
