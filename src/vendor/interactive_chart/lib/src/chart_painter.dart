@@ -375,6 +375,16 @@ class ChartPainter extends CustomPainter {
         // ..color = Color(0xFFD50000),
       );
     }
+    // Draw overmind lastClose (not real time Binance close)
+    if (lastClose != 0.0) {
+      canvas.drawLine(
+        Offset(x + thickWidth, params.fitPrice(lastClose!)),
+        Offset(x - thickWidth, params.fitPrice(lastClose!)),
+        Paint()
+        ..strokeWidth = 1.0
+        ..color = lineColors["takeProfit"]!
+      );
+    }
     // Draw recommended portfolio tp & sl
     if (newTp != 0.0 && newSl != 0.0) {
       canvas.drawLine(

@@ -19,13 +19,14 @@ class Holding {
   final double trainingScore;
   final double outputScore;
   final double outputDelta;
+  final double outputActivation;
   final List<dynamic> lastTrades;
   final double tpVolPerc;
   final double slVolPerc;
   final double direction1;
   final double direction2;
-  final double tpBig;
-  final double tpWithin;
+  final double tpLower;
+  final double tpUpper;
 
   Holding({
       required this.takeProfit,
@@ -40,14 +41,30 @@ class Holding {
       required this.trainingScore,
       required this.outputScore,
       required this.outputDelta,
+      required this.outputActivation,
       required this.lastTrades,
       required this.tpVolPerc,
       required this.slVolPerc,
       required this.direction1,
       required this.direction2,
-      required this.tpBig,
-      required this.tpWithin,
+      required this.tpLower,
+      required this.tpUpper,
   });
+
+  double calculateTradeFactor() {
+    double factor;
+    final outputScore = this.outputScore;
+
+    if (outputScore < 0.6) {
+      factor = 0.0;
+    } else if (outputScore >= 0.8) {
+      factor = 1.0;
+    } else {
+      factor = 0.5 + ((outputScore - 0.6) / (0.8 - 0.6)) * 0.5;
+    }
+
+    return factor;
+  }
 
   factory Holding.fromJson(Map<String, dynamic> json) {
     return Holding(
@@ -63,13 +80,14 @@ class Holding {
       trainingScore: json['trainingScore'].toDouble(),
       outputScore: json['outputScore'].toDouble(),
       outputDelta: json['outputDelta'].toDouble(),
+      outputActivation: json['outputActivation'].toDouble(),
       lastTrades: json['lastTrades'].toList() as List<dynamic>,
       tpVolPerc: json['tpVolPerc'].toDouble(),
       slVolPerc: json['slVolPerc'].toDouble(),
       direction1: json['direction1'].toDouble(),
       direction2: json['direction2'].toDouble(),
-      tpBig: json['tpBig'].toDouble(),
-      tpWithin: json['tpWithin'].toDouble(),
+      tpLower: json['tpLower'].toDouble(),
+      tpUpper: json['tpUpper'].toDouble(),
     );
   }
 }
@@ -125,13 +143,14 @@ class Portfolio {
         trainingScore: 0.0,
         outputScore: 0.0,
         outputDelta: 0.0,
+        outputActivation: 0.0,
         lastTrades: [],
         tpVolPerc: 0.0,
         slVolPerc: 0.0,
         direction1: 0.0,
         direction2: 0.0,
-        tpBig: 0.0,
-        tpWithin: 0.0,
+        tpLower: 0.0,
+        tpUpper: 0.0,
       ),
       // orElse: () => Holding(),
     );
@@ -278,26 +297,61 @@ class Portfolio {
   }
 
   void filterBest() {
-    holdings.removeWhere((holding) {
-        if (holding.tpBig <= 0.0) {
-          return true;
-        }
-        if (holding.tpWithin <= 0.0) {
-          return true;
-        }
-        bool directionOk;
-        if (holding.takeProfit > 0) {
-          directionOk = holding.direction1 > 0.10 && holding.direction2 < -0.10;
-        } else if (holding.takeProfit < 0) {
-          directionOk = holding.direction1 < -0.10 && holding.direction2 > 0.10;
-        } else {
-          directionOk = false;
-        }
+    const double dirThreshold = 0.50;
+    const double minOutputScore = 0.60;
+    const int minHighScoring = 0;
 
-        bool scoreOk = holding.outputScore >= 0.60;
+    Holding? fallbackHolding;
+    for (var h in holdings) {
+      if (h.outputScore < minOutputScore) {
+        if (fallbackHolding == null || h.outputScore > fallbackHolding.outputScore) {
+          fallbackHolding = h;
+        }
+      }
+    }
+
+    final highScoreHoldings = holdings.where((h) => h.outputScore >= minOutputScore).toList();
+
+    holdings.removeWhere((holding) {
+        // if (holding.tpLower <= 0.0 || holding.tpUpper <= 0.0) return true;
+        if (holding.tpLower <= 0.0 || holding.tpUpper <= 0.0) return true;
+
+        final bool scoreOk = holding.outputScore >= minOutputScore;
+
+        // final bool directionOk = (holding.takeProfit > 0 && holding.direction1 > 0 && holding.direction2 <= 0) ||
+        // (holding.takeProfit > 0 && holding.direction1 > 0 && holding.direction2 > 0) ||
+        // (holding.takeProfit < 0 && holding.direction1 < 0 && holding.direction2 >= 0) ||
+        // (holding.takeProfit < 0 && holding.direction1 < 0 && holding.direction2 < 0);
+
+        final bool directionOk =
+        (holding.takeProfit > 0 && holding.direction1 > dirThreshold && holding.direction2 < -dirThreshold) ||
+        (holding.takeProfit < 0 && holding.direction1 < -dirThreshold && holding.direction2 > dirThreshold);
+        // final bool directionOk = true;
 
         return !(directionOk && scoreOk);
     });
+
+    // if (highScoreHoldings.length < minHighScoring) {
+    //   holdings.clear();
+    //   return;
+    // }
+
+    // int upCount = highScoreHoldings.where((h) => h.takeProfit > 0).length;
+    // int downCount = highScoreHoldings.where((h) => h.takeProfit < 0).length;
+
+    // if (upCount > downCount) {
+    //   holdings.removeWhere((h) => h.takeProfit < 0);
+    // } else if (downCount > upCount) {
+    //   holdings.removeWhere((h) => h.takeProfit > 0);
+    // } else {
+    //   if (fallbackHolding == null || fallbackHolding.takeProfit == 0) {
+    //     holdings.clear();
+    //   } else if (fallbackHolding.takeProfit > 0) {
+    //     holdings.removeWhere((h) => h.takeProfit < 0);
+    //   } else {
+    //     holdings.removeWhere((h) => h.takeProfit > 0);
+    //   }
+    // }
   }
 
   Portfolio filterOutSymbols(List<String> symbolsToExclude) {
@@ -312,7 +366,7 @@ class Portfolio {
     List<({Holding holding, double mean})> holdingMeans = holdings.map((holding) {
         double rhoValue = rho[holding.instrument] ?? 0.0;
         // double mean = (rhoValue + holding.outputScore + holding.outputDelta) / 3.0;
-        double mean = (holding.outputScore + holding.outputDelta) / 2.0;
+        double mean = (holding.outputScore + holding.outputActivation) / 2.0;
         return (holding: holding, mean: mean);
     }).toList();
 
@@ -395,6 +449,7 @@ class OvermindApi {
   // final String baseUrl = 'http://localhost:1989';
   // final String baseUrl = 'https://overmind.pagekite.me';
   final String baseUrl = 'http://172.20.23.250:1989';
+  final String env = '1';
 
   Future<Portfolio> trainPortfolio(
     String apiKey,
@@ -404,25 +459,29 @@ class OvermindApi {
     double slPercentage,
   ) async {
     try {
-      final Map<String, String> params = {
-        'iterations': iterations.toString(),
-        'maxTradeHorizon': maxTradeHorizon.toString(),
-        'tpPercentage': tpPercentage.toString(),
-        'slPercentage': slPercentage.toString(),
+      final Map<String, dynamic> requestBody = {
+        'iterations': iterations,
+        'maxTradeHorizon': maxTradeHorizon,
+        'tpPercentage': tpPercentage,
+        'slPercentage': slPercentage,
       };
       final String token = 'Bearer $apiKey';
 
-      final String endpoint = '/v1/portfolio/train-all';
-      final Uri url = Uri.parse('$baseUrl$endpoint${Uri(queryParameters: params)}');
+      final String endpoint = '/v1/models/$env/train';
+      final Uri url = Uri.parse('$baseUrl$endpoint');
 
       final Map<String, String> headers = {
         'Authorization': token,
+        'Content-Type': 'application/json',
       };
 
-      final http.Response response = await http.get(url, headers: headers);
+      final http.Response response = await http.post(
+        url,
+        headers: headers,
+        body: jsonEncode(requestBody),
+      );
 
       if (response.statusCode == 200) {
-        // await player.play(UrlSource('https://dpoetry.com/test/games/package/files/constructFiles/Files/025832392-magic-idea-05.wav'));
         List<dynamic> jsonResponse = jsonDecode(response.body);
         Portfolio portfolio = Portfolio.fromJson(jsonResponse);
         return portfolio;
@@ -449,11 +508,11 @@ class OvermindApi {
         'maxTradeHorizon': maxTradeHorizon.toString(),
         'tpPercentage': tpPercentage.toString(),
         'slPercentage': slPercentage.toString(),
-        'instruments': symbols.join(","),
+        'symbols': symbols.join(","),
       };
       final String token = 'Bearer $apiKey';
 
-      final String endpoint = '/v1/portfolio/train-some';
+      final String endpoint = '/v1/models/$env/train';
       final Uri url = Uri.parse('$baseUrl$endpoint${Uri(queryParameters: params)}');
 
       final Map<String, String> headers = {
@@ -482,7 +541,7 @@ class OvermindApi {
     try {
       final String token = 'Bearer $apiKey';
 
-      final String endpoint = '/v1/portfolio/refresh-model';
+      final String endpoint = '/v1/models/$env/reset';
       final Uri url = Uri.parse('$baseUrl$endpoint');
 
       final Map<String, String> headers = {
@@ -495,7 +554,7 @@ class OvermindApi {
 
       final Uri urlWithQuery = url.replace(queryParameters: queryParams);
 
-      final http.Response response = await http.get(urlWithQuery, headers: headers);
+      final http.Response response = await http.post(urlWithQuery, headers: headers);
 
       if (response.statusCode == 200) {
         List<dynamic> jsonResponse = jsonDecode(response.body);
@@ -517,7 +576,7 @@ class OvermindApi {
     try {
       final String token = 'Bearer $apiKey';
 
-      final String endpoint = '/v1/portfolio/refresh-models';
+      final String endpoint = '/v1/models/$env/reset';
       final Uri url = Uri.parse('$baseUrl$endpoint');
 
       final Map<String, String> headers = {
@@ -530,7 +589,7 @@ class OvermindApi {
 
       final Uri urlWithQuery = url.replace(queryParameters: queryParams);
 
-      final http.Response response = await http.get(urlWithQuery, headers: headers);
+      final http.Response response = await http.post(urlWithQuery, headers: headers);
 
       if (response.statusCode == 200) {
         List<dynamic> jsonResponse = jsonDecode(response.body);
@@ -545,59 +604,20 @@ class OvermindApi {
     }
   }
 
-  Future<Map<String, List<double>>> getMinMaxPrices(
-    String apiKey,
-    int pastPricesCount
-  ) async {
-    try {
-      final String token = 'Bearer $apiKey';
-
-      final String endpoint = '/v1/portfolio/min-max-prices';
-      final Map<String, String> params = {
-        'n': pastPricesCount.toString(),
-      };
-      final Uri url = Uri.parse('$baseUrl$endpoint${Uri(queryParameters: params)}');
-
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-
-        Map<String, List<double>> parsedResponse = jsonResponse.map(
-          (key, value) => MapEntry(
-            key,
-            List<double>.from(value)
-          )
-        );
-
-        return parsedResponse;
-      } else {
-        throw Exception('Failed to fetch min max prices');
-      }
-    } catch (error) {
-      print('Error fetching min max prices: $error');
-      return {};
-    }
-  }
-
   Future<Portfolio> resetPortfolio(
     String apiKey
   ) async {
     try {
       final String token = 'Bearer $apiKey';
 
-      final String endpoint = '/v1/portfolio/refresh';
+      final String endpoint = '/v1/models/$env/reset';
       final Uri url = Uri.parse('$baseUrl$endpoint');
 
       final Map<String, String> headers = {
         'Authorization': token,
       };
 
-      final http.Response response = await http.get(url, headers: headers);
+      final http.Response response = await http.post(url, headers: headers);
 
       if (response.statusCode == 200) {
         List<dynamic> jsonResponse = jsonDecode(response.body);
@@ -615,7 +635,7 @@ class OvermindApi {
   Future<List<String>> getSymbols(String apiKey) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/info/instruments';
+      final String endpoint = '/v1/meta/symbols';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,
@@ -624,7 +644,12 @@ class OvermindApi {
       final http.Response response = await http.get(url, headers: headers);
 
       if (response.statusCode == 200) {
-        List<String> jsonResponse = (jsonDecode(response.body) as List).map((e) => e.toString()).toList();
+        Map<String, dynamic> decodedData = jsonDecode(response.body);
+
+        List<String> jsonResponse = (decodedData['crypto'] as List)
+        .map((e) => e.toString())
+        .toList();
+
         return jsonResponse;
       } else {
         throw Exception('Failed to load available symbols');
@@ -668,7 +693,7 @@ class OvermindApi {
   Future<bool> isTrainInQueue(String apiKey) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/portfolio/train-in-queue';
+      final String endpoint = '/v1/models';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,
@@ -691,10 +716,10 @@ class OvermindApi {
   Future<Map<String, double>> getRho(String apiKey, List<String> instruments) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/results/rho';
+      final String endpoint = '/v1/indicators/correlation';
       final String instrumentsParam = instruments.join(',');
       final Map<String, String> queryParams = {
-        'instruments': instrumentsParam,
+        'symbols': instrumentsParam,
       };
       final Uri url = Uri.parse('$baseUrl$endpoint').replace(queryParameters: queryParams);
       final Map<String, String> headers = {
@@ -726,7 +751,7 @@ class OvermindApi {
   Future<Portfolio> getPortfolio(String apiKey) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/results/portfolio';
+      final String endpoint = '/v1/models/$env/outputs';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,
@@ -746,74 +771,10 @@ class OvermindApi {
     }
   }
 
-  Future<Portfolio> getPortfolioFilter(String apiKey, List<String> symbols) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/results/portfolio-filter';
-      final Map<String, String> params = {
-        'instruments': symbols.join(","),
-      };
-      final Uri url = Uri.parse('$baseUrl$endpoint${Uri(queryParameters: params)}');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        return Portfolio.fromJson(jsonResponse);
-      } else {
-        throw Exception('Failed to load portfolio results');
-      }
-    } catch (error) {
-      print('Error fetching portfolio results: $error');
-      return Portfolio(holdings: []);
-    }
-  }
-
-  Future<Portfolio> getPortfolioFilterBalance(String apiKey, List<String> symbols, double balance, int openPositionsCount) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/results/portfolio-filter-balance';
-      var div = 0.95;
-      var finalBalance = div * balance;
-      var sharePerc = 0.30;
-      final capacity = (1.0 / sharePerc).floor();
-      final totalOpen = symbols.length + openPositionsCount;
-
-      if (totalOpen < capacity) {
-        div = sharePerc * symbols.length;
-        finalBalance = div * (balance / (1.0 - (openPositionsCount * sharePerc)));
-      }
-
-      final Map<String, dynamic> params = {
-        'instruments': symbols.join(","),
-        'balance': finalBalance.toString()
-      };
-      final Uri url = Uri.parse('$baseUrl$endpoint${Uri(queryParameters: params)}');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        return Portfolio.fromJson(jsonResponse);
-      } else {
-        throw Exception('Failed to load portfolio results');
-      }
-    } catch (error) {
-      print('Error fetching portfolio results: $error');
-      return Portfolio(holdings: []);
-    }
-  }
-
   Future<Portfolio> getFuturesPortfolio(String apiKey) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/results/portfolio';
+      final String endpoint = '/v1/models/$env/outputs';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,
@@ -836,7 +797,7 @@ class OvermindApi {
   Future<Map<String, dynamic>> getAmherag(String symbol, String timeframe, String apiKey) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/amherag?instrument=${symbol}&timeframe=${timeframe}';
+      final String endpoint = '/v1/indicators/amherag?symbol=${symbol}&timeframe=${timeframe}';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,
@@ -858,7 +819,7 @@ class OvermindApi {
   Future<Map<String, dynamic>> getLatestPrice(String apiKey, String symbol) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/results/latest-price?instrument=${symbol}';
+      final String endpoint = '/v1/meta/latestPrice?symbol=${symbol}';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,
@@ -880,7 +841,7 @@ class OvermindApi {
   Future<Map<String, double>> getLatestPrices(String apiKey, List<String> symbols) async {
     try {
       final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/results/latest-prices?instruments=${symbols.join(",")}';
+      final String endpoint = '/v1/meta/latestPrices?symbol=${symbols.join(",")}';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       final Map<String, String> headers = {
         'Authorization': token,
@@ -906,13 +867,13 @@ class OvermindApi {
   Future<String> getFreeTierApiKey() async {
     try {
       // final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/auth/init-token';
+      final String endpoint = '/v1/auth/token/free';
       final Uri url = Uri.parse('$baseUrl$endpoint');
       // final Map<String, String> headers = {
       //   'Authorization': token,
       // };
 
-      final http.Response response = await http.post(url);
+      final http.Response response = await http.get(url);
 
       if (response.statusCode == 200) {
         return response.body;

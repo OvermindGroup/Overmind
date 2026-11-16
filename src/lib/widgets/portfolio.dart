@@ -565,19 +565,18 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     final columnTitles = [
       'Actions',
       'Asset',
-      'TF',
+      // 'TF',
       // 'Risk Reward',
       // 'Training',
-      'Testing',
+      // 'Testing',
       // 'σ',
       // 'ρ',
       'Last Trades',
       'μ',
+      'α',
       // 'Allocation (\$)',
       'Dir1',
       'Dir2',
-      'TP Big',
-      'TP Within',
       'Take Profit',
       'Stop Loss',
       // 'Hold Duration',
@@ -598,7 +597,7 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
     return filteredPortfolio.map((asset) {
         bool isOpenPosition = widget.openPositions['portfolio'].any((map) => map['symbol'] == asset.instrument);
         double rhoValue = rho[asset.instrument] ?? 1.0;
-        double fontSize = asset.timeframe == '1h' ? 14.0 : 11.0;
+        double fontSize = asset.timeframe == '5m' ? 14.0 : 11.0;
         return DataRow(
           color: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
               if (states.contains(MaterialState.selected)) {
@@ -610,30 +609,31 @@ class _OptimizedPortfolioDialogState extends State<OptimizedPortfolioDialog> {
               if (isOpenPosition) {
                 return Colors.lightGreen.withOpacity(0.3); // Color for open positions
               }
-              if (asset.timeframe == '1h') {
+              if (asset.timeframe == '5m') {
                 return Colors.grey.withOpacity(0.2);
               }
               return null; // Default color, typically transparent
           }),
           cells: [
-            asset.timeframe == '1h' ? _buildActionCell(context, asset) : DataCell(Row()),
+            asset.timeframe == '5m' ? _buildActionCell(context, asset) : DataCell(Row()),
             _buildTextCell(asset.instrument, fontSize),
-            _buildTextCell(asset.timeframe.toUpperCase(), fontSize),
+            // _buildTextCell(asset.timeframe.toUpperCase(), fontSize),
             // _buildTextCell(asset.riskReward.toStringAsFixed(2)),
             // _buildScoreCell(asset.trainingScore.toStringAsFixed(2), 1.0, fontSize),
-            _buildScoreCell(asset.testingScore.toStringAsFixed(2), 1.0, fontSize),
+            // _buildScoreCell(asset.testingScore.toStringAsFixed(2), 1.0, fontSize),
             // _buildScoreCell(asset.outputDelta.toStringAsFixed(2), 0.7, fontSize),
             // _buildScoreCell(rhoValue.toStringAsFixed(2), 0.0),
             _buildListTradesCell(asset.lastTrades, fontSize),
-            _buildScoreCell(asset.outputScore.toStringAsFixed(2), 0.6, fontSize),
+            _buildScoreCell(asset.outputScore.toStringAsFixed(2), 0.60, fontSize),
+            _buildScoreCell(asset.outputActivation.toStringAsFixed(2), 0.78, fontSize),
             _buildDirectionCell(asset.direction1.toStringAsFixed(2),
               asset.direction1, 0.0, asset.takeProfit * -1,
               fontSize),
             _buildDirectionCell(asset.direction2.toStringAsFixed(2),
               asset.direction2, 0.0, asset.takeProfit,
               fontSize),
-            _buildDoubleToBool(asset.tpBig, fontSize),
-            _buildDoubleToBool(asset.tpWithin, fontSize),
+            // _buildDoubleToBool(asset.tpLower, fontSize),
+            // _buildDoubleToBool(asset.tpUpper, fontSize),
             _buildPriceCell(asset.takeProfit, asset.instrument,
               asset.takeProfit > asset.stopLoss ? true : false, fontSize),
             _buildPriceCell(asset.stopLoss, asset.instrument,

@@ -1,4 +1,5 @@
 // import 'dart:convert';
+import 'dart:math';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 // import 'package:candlesticks/candlesticks.dart';
@@ -27,9 +28,96 @@ import 'services/overmind_api.dart';
 import 'services/update_checker.dart';
 import 'package:fluttertoast/fluttertoast.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 FToast fToast = FToast();
+
+class PnLChart extends StatelessWidget {
+  final List<FlSpot> pnlData;
+  final List<Map<String, dynamic>> tooltipData;
+
+  PnLChart(this.pnlData, {required this.tooltipData});
+
+  @override
+  Widget build(BuildContext context) {
+    return LineChart(
+      LineChartData(
+        gridData: FlGridData(show: true),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 50, // Keep this for proper spacing
+              getTitlesWidget: (value, meta) {
+                String formattedValue;
+                final absValue = value.abs();
+
+                if (absValue < 0.001) {
+                  formattedValue = value.toStringAsFixed(6);
+                } else if (absValue < 0.01) {
+                  formattedValue = value.toStringAsFixed(5);
+                } else if (absValue < 0.1) {
+                  formattedValue = value.toStringAsFixed(4);
+                } else if (absValue < 1) {
+                  formattedValue = value.toStringAsFixed(3);
+                } else if (absValue < 10) {
+                  formattedValue = value.toStringAsFixed(2);
+                } else if (absValue < 100) {
+                  formattedValue = value.toStringAsFixed(1);
+                } else {
+                  formattedValue = value.toStringAsFixed(0);
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Text(
+                    '\$$formattedValue',
+                    style: TextStyle(color: Colors.white, fontSize: 10),
+                    textAlign: TextAlign.right,
+                  ),
+                );
+              },
+            ),
+          ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        ),
+
+        lineBarsData: [
+          LineChartBarData(
+            spots: pnlData,
+            isCurved: true,
+            color: Colors.blue,
+            dotData: FlDotData(show: true),
+          ),
+        ],
+
+        lineTouchData: LineTouchData(
+          enabled: true,
+          touchTooltipData: LineTouchTooltipData(
+            getTooltipItems: (List<LineBarSpot> touchedSpots) {
+              return touchedSpots.map((touchedSpot) {
+                  final index = touchedSpot.spotIndex;
+                  if (index >= 0 && index < tooltipData.length) {
+                    final data = tooltipData[index];
+                    return LineTooltipItem(
+                      '${DateFormat('MMM dd, yyyy HH:mm').format(data['date'])}\n'
+                      'Cumulative: \$${data['cumulativePnl'].toStringAsFixed(4)}',
+                      TextStyle(color: Colors.white, fontSize: 12),
+                    );
+                  }
+                  return LineTooltipItem('', TextStyle(color: Colors.white));
+              }).toList();
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,18 +146,18 @@ class Overmind extends StatelessWidget {
     return FlutterSizer(
       builder: (context, orientation, screenType) {
         return MediaQuery(
-      data: MediaQuery.of(context).copyWith(
-        textScaler: TextScaler.linear(1),
-      ),
-      child: MaterialApp(
-          builder: FToastBuilder(),
-          title: 'Overmind',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData.dark(),
-          home: HomeScreen(),
-          navigatorKey: navigatorKey,
-        ),
-    );
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(1),
+          ),
+          child: MaterialApp(
+            builder: FToastBuilder(),
+            title: 'Overmind',
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData.dark(),
+            home: HomeScreen(),
+            navigatorKey: navigatorKey,
+          ),
+        );
     });
   }
 }
@@ -122,7 +210,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double _stopLoss = 05.0;
   late double _amheragHeight;
   String _symbol = "BTCUSDT";
-  String _timeframe = "1h";
+  String _timeframe = "5m";
   String _auxTimeframe = "30m";
   double _tp = 0.0;
   double _sl = 0.0;
@@ -131,6 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
   double _auxTp = 0.0;
   double _auxSl = 0.0;
   double _entryPrice = 0.0;
+  double _lastClose = 0.0;
   int _filterTopN = 10;
 
   double _minTpVolPerc = 0.02;
@@ -139,7 +228,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // double _maxSlVolPerc = 0.0;
   double _tradePercAllocation = 0.20;
   Map<String, double> _latestPrices = {};
-  bool _isAutoTrade = true;
+  bool _isAutoTrade = false;
+  bool _trainedAtLeastOnce = true;
 
   late List<CandleData> candles = [];
 
@@ -201,7 +291,9 @@ class _HomeScreenState extends State<HomeScreen> {
     // if you want to use context from globally instead of content we need to pass navigatorKey.currentContext!
     fToast.init(navigatorKey.currentContext!);
 
-    startAutomatedTrading();
+    if (_isAutoTrade) {
+      startAutomatedTrading();
+    }
   }
 
   Future<void> _fetchOvermindData() {
@@ -254,21 +346,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void _stopTrainingCheckStream() {
     _trainingCheckStream?.cancel();
     _trainingCheckStream = null;
-    print('Training stream is stopped');
   }
 
   Future<void> _startTrainingCheckStream() async {
     _trainingCheckStream = Stream.periodic(const Duration(seconds: 2)).listen((_) async {
         bool isInQueue = await overmind.isTrainInQueue(_overmindApiKey);
         if (!isInQueue) {
+          _trainedAtLeastOnce = true;
           _stopTrainingCheckStream();
-          player.play(UrlSource('https://dpoetry.com/test/games/package/files/constructFiles/Files/025832392-magic-idea-05.wav'));
-          _showToast("Training complete");
-          if(_isAutoTrade) {
-            await fetchAndExecutePortfolio();
-          } else {
-            await _updatePortfolio();
+          if (!_isAutoTrade) {
+            player.play(UrlSource('https://dpoetry.com/test/games/package/files/constructFiles/Files/025832392-magic-idea-05.wav'));
           }
+          _showToast("Training complete");
         }
     });
   }
@@ -310,10 +399,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> fetchAndExecutePortfolio() async {
-    // Fetch the portfolio
     await _updatePortfolioAutoTrade().then((_) async {
         final symbols = optimizedPortfolio.symbols;
-        print('Symbols: $symbols');
         // Check if symbols has at least one item before executing
         if (symbols.length > 0) {
           await _executePortfolio();
@@ -323,11 +410,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void startAutomatedTrading() {
     // Immediately call train, because this is handled by an internal queue.
-    Future.delayed(Duration(seconds: 5)).then((_) {
-        _handleTrainPortfolio();
-    });
-    Timer.periodic(Duration(seconds: 300), (Timer timer) async {
-        _handleTrainPortfolio();
+    // Future.delayed(Duration(seconds: 5)).then((_) {
+    //     _handleTrainPortfolio();
+    // });
+    // Timer.periodic(Duration(seconds: 900), (Timer timer) async {
+    //     _handleTrainPortfolio();
+    // });
+    Timer.periodic(Duration(seconds: 10), (Timer timer) async {
+        if (_trainedAtLeastOnce) {
+          fetchAndExecutePortfolio();
+        }
     });
   }
 
@@ -351,14 +443,6 @@ class _HomeScreenState extends State<HomeScreen> {
     //   filteredPortfolio = fullPortfolio;
     // }
 
-    // if (_optimizationSettings.selectedMinTpSl > 0.0 && _optimizationSettings.selectedMarketType != "noPreference") {
-    //   final minMax = await overmind.getMinMaxPrices(_overmindApiKey, _optimizationSettings.sandrPastN);
-    //   if (_optimizationSettings.selectedMarketType == "stagnatedMarkets") {
-    //     filteredPortfolio = filteredPortfolio.filterStagnated(minMax, _optimizationSettings.minTpSlPadding);
-    //   } else {
-    //     filteredPortfolio = filteredPortfolio.filterTrending(minMax);
-    //   }
-
     //   if (_optimizationSettings.selectedMinTpSl > 0.0) {
     //     filteredPortfolio = filteredPortfolio.filterMinTpSl(minMax, _optimizationSettings.selectedMinTpSl);
     //   }
@@ -380,10 +464,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Removing any excluded symbols
     // filteredPortfolio = filteredPortfolio.filterOutSymbols(_excludedSymbols.toList());
-
-    // if (_optimizationSettings.showAffordable) {
-    //   filteredPortfolio = await _filterPortfolioByBalance(filteredPortfolio);
-    // }
 
     return portfolio;
   }
@@ -461,19 +541,25 @@ class _HomeScreenState extends State<HomeScreen> {
         final orderList = orders[i];
 
         if (orderList.length > 0) {
-          final stopPrice1 = orderList.isNotEmpty ? double.parse(orderList[0]["stopPrice"] ?? '0') : 0.0;
-          final stopPrice2 = orderList.length > 1 ? double.parse(orderList[1]["stopPrice"] ?? '0') : 0.0;
+          final stopPrice1 = orderList.isNotEmpty ? double.parse(orderList[0]["triggerPrice"] ?? '0') : 0.0;
+          final stopPrice2 = orderList.length > 1 ? double.parse(orderList[1]["triggerPrice"] ?? '0') : 0.0;
           tpPrice = stopPrice1;
           slPrice = stopPrice2;
-          if (orderList[0]["type"] == "STOP_MARKET") {
+          if (orderList[0]["orderType"] == "STOP_MARKET") {
             tpPrice = stopPrice2;
             slPrice = stopPrice1;
           }
 
           final currentPrice = prices[symbol] ?? 0.0;
 
-          tpDistance = amount > 0 ? (tpPrice - currentPrice) / currentPrice * 100 : (currentPrice - tpPrice) / currentPrice * 100;
-          slDistance = amount > 0 ? (currentPrice - slPrice) / currentPrice * 100 : (slPrice - currentPrice) / currentPrice * 100;
+          final tpPotential = ((initialMargin / entryPrice) * tpPrice) - initialMargin;
+          final slPotential = initialMargin - ((initialMargin / entryPrice) * slPrice);
+
+          if (unRealizedProfit > 0) {
+            tpDistance = unRealizedProfit.abs() / tpPotential * 100.0;
+          } else {
+            slDistance = unRealizedProfit.abs() / slPotential * 100.0;
+          }
         }
 
         portfolio.add({
@@ -482,8 +568,8 @@ class _HomeScreenState extends State<HomeScreen> {
             "positionAmt": amount,
             "tpPrice": tpPrice,
             "slPrice": slPrice,
-            "tpDistance": tpDistance > 0.0 ? tpDistance / (tpDistance + slDistance) * 100.0 : 0.0,
-            "slDistance": slDistance > 0.0 ? slDistance / (tpDistance + slDistance) * 100.0 : 0.0,
+            "tpDistance": tpDistance,
+            "slDistance": slDistance,
             "unRealizedProfit": unRealizedProfit,
             "initialMargin": initialMargin,
         });
@@ -526,23 +612,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _processPositions(positions);
   }
 
-  Future<Portfolio> _filterPortfolioByBalance(Portfolio filteredPortfolio) async {
-    final balance = await binance.getUserBalance(_binanceApiKey, _binanceApiSecret, _quoteSymbol);
-    final filteredSymbols = filteredPortfolio.map((holding) => holding.instrument);
-    final minQuantities = await binance.futuresMinimumQuantities(filteredSymbols);
-    final positions = await binance.getUserOpenPositions(_binanceApiKey, _binanceApiSecret);
-    final portfolioNewAllocations = await overmind.getPortfolioFilterBalance(_overmindApiKey, filteredSymbols, double.parse(balance['availableBalance']) ?? 0.0, positions.length);
-
-    final validHoldings = portfolioNewAllocations.where((holding) {
-        final minQty = double.parse(minQuantities[holding.instrument]?['minQuantity']);
-        if (minQty == null) return false;
-        return holding.allocation > (minQty ?? 0.0);
-    });
-
-    final validSymbols = validHoldings.map((holding) => holding.instrument);
-    return await overmind.getPortfolioFilterBalance(_overmindApiKey, validSymbols, double.parse(balance['availableBalance']) ?? 0.0, positions.length);
-  }
-
   Future<void> _tradeHolding(Holding holding, double allocationUSDT, int leverage) async {
     String symbol = holding.instrument;
     final latestPrice = await overmind.getLatestPrice(_overmindApiKey, symbol);
@@ -558,11 +627,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final balance = await binance.getUserBalance(_binanceApiKey, _binanceApiSecret, _quoteSymbol);
     final totalBalance = double.parse(balance["balance"] ?? '0');
     final availableBalance = double.parse(balance["availableBalance"] ?? '0');
-    final allocation = allocationUSDT / price;
+    final tradeFactor = holding.calculateTradeFactor();
+    print('outputScore: ${holding.outputScore}, tradeFactor: $tradeFactor');
+    final allocation = allocationUSDT * tradeFactor;
+    final allocationToFmt = allocation / price;
     // final allocation = holding.allocation / price;
-    final formattedQty = allocation.toStringAsFixed(quantityPrecision);
+    final formattedQty = allocationToFmt.toStringAsFixed(quantityPrecision);
 
-    if (availableBalance < allocationUSDT) {
+    if (availableBalance < allocation) {
       print('Not enough balance ($availableBalance < $allocationUSDT) for opening a new position for $symbol');
       return;
     }
@@ -589,7 +661,7 @@ class _HomeScreenState extends State<HomeScreen> {
             formattedTp,
           );
 
-          if (takeProfitResponse['status'] != 'NEW') {
+          if (takeProfitResponse['algoStatus'] != 'NEW') {
             throw Exception('Take Profit order creation failed: ${takeProfitResponse}');
           }
 
@@ -603,7 +675,7 @@ class _HomeScreenState extends State<HomeScreen> {
             formattedSl,
           );
 
-          if (stopLossResponse['status'] != 'NEW') {
+          if (stopLossResponse['algoStatus'] != 'NEW') {
             throw Exception('Stop Loss order creation failed: ${stopLossResponse}');
           }
 
@@ -657,7 +729,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (positions.length <= 0) {
         // No open positions for this symbol
         try {
-          await _tradeHolding(holding, 25.0, 1);
+          await _tradeHolding(holding, 50.0, 1);
         } catch (e) {
           print('Error trying to trade holding: $e');
         }
@@ -766,26 +838,44 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void populateChart() {
-    // setState(() {
-    //     candles = [];
-    // });
-    fetchCandles().then((value) {
+    fetchCandles().then((value) async {
+        // final currentPrice = await binance.getPrices([_symbol]);
+        // print('currentPrice: $currentPrice');
+
+        final bookTicker = await binance.getBookPrices([_symbol]);
+
+        final lastCloseAsk = bookTicker[_symbol]?.ask?.toDouble() ?? 0.0;
+        final lastCloseBid = bookTicker[_symbol]?.bid?.toDouble() ?? 0.0;
+
+        if (_newTp == 0.0) {
+          print("just checking if it runs before populating anything");
+        }
+
+        var closePrice = lastCloseAsk;
+        if (_newTp < 0.0) {
+          closePrice = lastCloseBid;
+        }
+
         List<CandleData> _candles = [];
         for (int i = 0; i < value.length; i++) {
           final row = value[i];
-          // DateTime dateTime = DateTime.parse(row['timestamp']);
-          // int unixTimestamp = dateTime.millisecondsSinceEpoch ~/ 1000;
           int unixTimestamp = row['timestamp'];
 
           final List<double>? above = (row['amheragAbove'] as List<dynamic>?)?.map((e) => e as double).toList();
           final List<double>? below = (row['amheragBelow'] as List<dynamic>?)?.map((e) => e as double).toList();
 
+          final isLastCandle = i == value.length - 1;
+          if (isLastCandle) {
+            _lastClose = row['close']?.toDouble();
+          }
           _candles.add(CandleData(
               timestamp: unixTimestamp,
               open: row['open']?.toDouble(),
               high: row['high']?.toDouble(),
               low: row['low']?.toDouble(),
-              close: row['close']?.toDouble(),
+              // close: row['close']?.toDouble(),
+              // close: isLastCandle ? currentPrice[_symbol]?.toDouble() : row['close']?.toDouble(),
+              close: isLastCandle ? closePrice : row['close']?.toDouble(),
               volume: row['volume']?.toDouble(),
               amheragAbove: above,
               amheragBelow: below,
@@ -1223,14 +1313,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (groupedOrders.containsKey(orderId)) {
         final existingOrder = groupedOrders[orderId]!;
-
         existingOrder['qty'] += double.tryParse(order['qty'].toString()) ?? 0.0;
-
         existingOrder['realizedPnl'] += double.tryParse(order['realizedPnl'].toString()) ?? 0.0;
         existingOrder['quoteQty'] += double.tryParse(order['quoteQty'].toString()) ?? 0.0;
         existingOrder['commission'] += double.tryParse(order['commission'].toString()) ?? 0.0;
       } else {
-        // Create a new entry if orderId doesn't exist
         String flippedSide = order['side'] == 'SELL' ? 'BUY' : 'SELL';
         groupedOrders[orderId] = {
           'symbol': order['symbol'],
@@ -1246,7 +1333,38 @@ class _HomeScreenState extends State<HomeScreen> {
         };
       }
     }
-    return groupedOrders.values.toList();
+
+    // --- Convert to list and sort by symbol + time ---
+    List<Map<String, dynamic>> groupedList = groupedOrders.values.toList();
+    groupedList.sort((a, b) {
+        int symCompare = a['symbol'].compareTo(b['symbol']);
+        if (symCompare != 0) return symCompare;
+        return (a['time'] as int).compareTo(b['time'] as int);
+    });
+
+    // --- Second pass: carry commission from opens to closes ---
+    Map<String, double> pendingCommission = {};
+    List<Map<String, dynamic>> finalClosedTrades = [];
+
+    for (var trade in groupedList) {
+      final symbol = trade['symbol'];
+      final realizedPnl = trade['realizedPnl'] as double;
+      final commission = trade['commission'] as double;
+
+      if (realizedPnl == 0.0) {
+        // Opening leg — store commission for this symbol
+        pendingCommission[symbol] = (pendingCommission[symbol] ?? 0) + commission;
+      } else {
+        // Closing leg — add any pending commission from opens
+        if (pendingCommission.containsKey(symbol) && pendingCommission[symbol]! > 0) {
+          trade['commission'] += pendingCommission[symbol]!;
+          pendingCommission[symbol] = 0; // reset after applying
+        }
+        finalClosedTrades.add(trade);
+      }
+    }
+
+    return finalClosedTrades;
   }
 
   void _showUserTradesDialog(BuildContext context) {
@@ -1266,6 +1384,7 @@ class _HomeScreenState extends State<HomeScreen> {
             builder: (BuildContext context, StateSetter setState) {
               return FutureBuilder<List<Map<String, dynamic>>>(
                 future: binance.getUserTrades(_binanceApiKey, _binanceApiSecret, startDate, endDate),
+                // future: binance.getIncomeHistory(_binanceApiKey, _binanceApiSecret, startDate, endDate),
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
                     return Center(child: Text('Error: ${snapshot.error}'));
@@ -1284,6 +1403,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     var trades = fullTrades;
 
+                    trades = _groupAndTransformOrders(trades);
+
                     // Calculate total Realized PnL
                     final totalRealizedPnl = trades.fold(
                       0.0,
@@ -1296,20 +1417,61 @@ class _HomeScreenState extends State<HomeScreen> {
                       (sum, trade) => sum + (double.tryParse(trade["realizedPnl"].toString()) ?? 0.0) - (double.tryParse(trade["commission"].toString()) ?? 0.0),
                     );
 
-                    trades = fullTrades
-                    .where((trade) => double.parse(trade["realizedPnl"]) != 0.0)
-                    .toList();
+                    final correctTradesCount = trades.fold(
+                      0,
+                      (count, trade) {
+                        final realizedPnl = double.tryParse(trade["realizedPnl"].toString()) ?? 0.0;
+                        return realizedPnl > 0 ? count + 1 : count;
+                      },
+                    );
+                    var accuracy = 0.0;
+                    if (trades.length > 0) {
+                      accuracy = (correctTradesCount / trades.length) * 100.0;
+                    }
+
+                    // trades = fullTrades
+                    // .where((trade) => double.parse(trade["realizedPnl"]) != 0.0)
+                    // .toList()
+
+                    // Sort Trades In Chronological Order
+                    trades.sort((a, b) => a["time"].compareTo(b["time"]));
+
+                    // trades = _groupAndTransformOrders(trades);
+
+                    // Prepare data for the cumulative PnL chart
+                    double cumulativePnl = 0.0;
+                    final List<FlSpot> pnlData = [];
+                    final List<Map<String, dynamic>> tooltipData = []; // Store data for tooltips
+
+                    // Iterate through trades and calculate cumulative PnL
+                    for (int i = 0; i < trades.length; i++) {
+                      final pnl = double.tryParse(trades[i]["realizedPnl"].toString()) ?? 0.0;
+                      // final pnl = (double.tryParse(trades[i]["realizedPnl"].toString()) ?? 0.0) - (double.tryParse(trades[i]["commission"].toString()) ?? 0.0);
+
+                      // print((double.tryParse(trades[i]["commission"].toString()) ?? 0.0));
+
+                      cumulativePnl += pnl;
+                      pnlData.add(FlSpot(i.toDouble(), cumulativePnl));
+
+                      // Store data for tooltips
+                      final timestamp = trades[i]["time"] as int;
+                      final tradeDate = DateTime.fromMillisecondsSinceEpoch(timestamp);
+                      tooltipData.add({
+                          'cumulativePnl': cumulativePnl,
+                          'date': tradeDate,
+                          'tradeNumber': i + 1,
+                      });
+                    }
+
                     trades.sort((a, b) => b["time"].compareTo(a["time"]));
 
-                    trades = _groupAndTransformOrders(trades);
-
                     return Center(
-                      child: IntrinsicWidth(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: min(1000, MediaQuery.of(context).size.width - 48),
+                          maxHeight: MediaQuery.of(context).size.height - 80,
+                        ),
                         child: Container(
-                          constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width - 48,
-                            maxHeight: MediaQuery.of(context).size.height - 80,
-                          ),
                           padding: EdgeInsets.all(24),
                           decoration: BoxDecoration(
                             color: Colors.grey[850],
@@ -1340,106 +1502,146 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 SizedBox(height: 16),
 
-                                // Date Range Picker Button
-                                ElevatedButton(
-                                  onPressed: () async {
-                                    final DateTimeRange? picked = await showDateRangePicker(
-                                      context: context,
-                                      firstDate: DateTime(2000),
-                                      lastDate: DateTime.now(),
-                                      initialDateRange: DateTimeRange(start: startDate, end: endDate),
-                                    );
-                                    if (picked != null) {
-                                      setState(() {
-                                          startDate = picked.start;
-
-                                          // Ensure that the endDate is the exact current time if it's today
-                                          if (picked.end.year == DateTime.now().year &&
-                                            picked.end.month == DateTime.now().month &&
-                                            picked.end.day == DateTime.now().day) {
-                                            // If it's today, set endDate to the exact current time
-                                            endDate = DateTime.now();
-                                          } else {
-                                            // Otherwise, set the endDate to the last moment of the picked end date (11:59:59 PM)
-                                            endDate = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
-                                          }
-                                      });
-                                    }
-                                  },
-                                  child: Text(
-                                    '${DateFormat('yyyy-MM-dd').format(startDate)} to ${DateFormat('yyyy-MM-dd').format(endDate)}',
+                                // Date Range Picker Button - Constrained
+                                Center(
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: 600),
+                                    child: ElevatedButton(
+                                      onPressed: () async {
+                                        final DateTimeRange? picked = await showDateRangePicker(
+                                          context: context,
+                                          firstDate: DateTime(2000),
+                                          lastDate: DateTime.now(),
+                                          initialDateRange: DateTimeRange(start: startDate, end: endDate),
+                                        );
+                                        if (picked != null) {
+                                          setState(() {
+                                              startDate = picked.start;
+                                              if (picked.end.year == DateTime.now().year &&
+                                                picked.end.month == DateTime.now().month &&
+                                                picked.end.day == DateTime.now().day) {
+                                                endDate = DateTime.now();
+                                              } else {
+                                                endDate = DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59);
+                                              }
+                                          });
+                                        }
+                                      },
+                                      child: Text(
+                                        '${DateFormat('yyyy-MM-dd').format(startDate)} to ${DateFormat('yyyy-MM-dd').format(endDate)}',
+                                      ),
+                                    ),
                                   ),
                                 ),
                                 SizedBox(height: 16),
 
-                                // // Display Total Realized PnL
-                                // Text(
-                                //   'Total Realized PnL: \$${totalRealizedPnl.toStringAsFixed(4)}',
-                                //   style: TextStyle(
-                                //     fontSize: 16,
-                                //     fontWeight: FontWeight.bold,
-                                //     color: totalRealizedPnl >= 0 ? Colors.green : Colors.red,
-                                //   ),
-                                // ),
-                                // SizedBox(height: 16),
+                                // PnL Chart
+                                Center(
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: 600),
+                                    child: Container(
+                                      height: 300,
+                                      padding: EdgeInsets.symmetric(horizontal: 16),
+                                      child: PnLChart(pnlData, tooltipData: tooltipData),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: 16),
 
-                                // // Display Total Realized PnL + commission
-                                // Text(
-                                //   'Total Realized PnL (with commissions): \$${totalRealizedPnlComm.toStringAsFixed(4)}',
-                                //   style: TextStyle(
-                                //     fontSize: 16,
-                                //     fontWeight: FontWeight.bold,
-                                //     color: totalRealizedPnl >= 0 ? Colors.green : Colors.red,
-                                //   ),
-                                // ),
-                                // SizedBox(height: 16),
+                                // Display Total Realized PnL - Also center these
+                                Center(
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: 600),
+                                    child: Text(
+                                      'P&L: \$${totalRealizedPnl.toStringAsFixed(4)}',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: totalRealizedPnl >= 0 ? Colors.green : Colors.red,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: 8),
+
+                                Center(
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: 600),
+                                    child: Text(
+                                      'P&L (with commissions): \$${totalRealizedPnlComm.toStringAsFixed(4)}',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: totalRealizedPnlComm >= 0 ? Colors.green : Colors.red,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: 16),
+
+                                Center(
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: 600),
+                                    child: Text(
+                                      'Accuracy: ${accuracy.toStringAsFixed(2)}% (${correctTradesCount}/${trades.length})',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: accuracy >= 55.0 ? Colors.green : Colors.red,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: 16),
 
                                 // Trades Table
-                                SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
+                                Center(
                                   child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
                                     child: ConstrainedBox(
                                       constraints: BoxConstraints(minWidth: 700),
-                                      child: DataTable(
-                                        showCheckboxColumn: false,
-                                        columnSpacing: 24,
-                                        columns: [
-                                          DataColumn(label: Text('Symbol', style: TextStyle(color: Colors.white))),
-                                          DataColumn(label: Text('Side', style: TextStyle(color: Colors.white))),
-                                          DataColumn(label: Text('Price', style: TextStyle(color: Colors.white))),
-                                          DataColumn(label: Text('Quantity', style: TextStyle(color: Colors.white))),
-                                          DataColumn(label: Text('Realized PnL', style: TextStyle(color: Colors.white))),
-                                          DataColumn(label: Text('Commission', style: TextStyle(color: Colors.white))),
-                                          DataColumn(label: Text('Time', style: TextStyle(color: Colors.white))),
-                                        ],
-                                        rows: trades.map<DataRow>((trade) {
-                                            final pnl = double.tryParse(trade["realizedPnl"].toString()) ?? 0.0;
-                                            final timestamp = trade["time"] as int;
-                                            final formattedTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(
-                                              DateTime.fromMillisecondsSinceEpoch(timestamp),
-                                            );
+                                      child: SingleChildScrollView(
+                                        child: DataTable(
+                                            showCheckboxColumn: false,
+                                            columnSpacing: 24,
+                                            columns: [
+                                              DataColumn(label: Text('Symbol', style: TextStyle(color: Colors.white))),
+                                              DataColumn(label: Text('Side', style: TextStyle(color: Colors.white))),
+                                              DataColumn(label: Text('Price', style: TextStyle(color: Colors.white))),
+                                              DataColumn(label: Text('Quantity', style: TextStyle(color: Colors.white))),
+                                              DataColumn(label: Text('Realized PnL', style: TextStyle(color: Colors.white))),
+                                              DataColumn(label: Text('Commission', style: TextStyle(color: Colors.white))),
+                                              DataColumn(label: Text('Time', style: TextStyle(color: Colors.white))),
+                                            ],
+                                            rows: trades.map<DataRow>((trade) {
+                                                final pnl = double.tryParse(trade["realizedPnl"].toString()) ?? 0.0;
+                                                final timestamp = trade["time"] as int;
+                                                final formattedTime = DateFormat('yyyy-MM-dd HH:mm:ss').format(
+                                                  DateTime.fromMillisecondsSinceEpoch(timestamp),
+                                                );
 
-                                            return DataRow(
-                                              cells: [
-                                                DataCell(Text(trade["symbol"] as String, style: TextStyle(color: Colors.white))),
-                                                DataCell(Text(trade["side"] as String, style: TextStyle(color: Colors.white))),
-                                                DataCell(Text(trade["price"].toString(), style: TextStyle(color: Colors.white))),
-                                                DataCell(Text(trade["qty"].toStringAsFixed(2), style: TextStyle(color: Colors.white))),
-                                                DataCell(
-                                                  Text(
-                                                    '\$${pnl.toStringAsFixed(4)}',
-                                                    style: TextStyle(
-                                                      color: pnl >= 0 ? Colors.green : Colors.red,
+                                                return DataRow(
+                                                  cells: [
+                                                    DataCell(Text(trade["symbol"] as String, style: TextStyle(color: Colors.white))),
+                                                    DataCell(Text(trade["side"] as String, style: TextStyle(color: Colors.white))),
+                                                    DataCell(Text(trade["price"].toString(), style: TextStyle(color: Colors.white))),
+                                                    DataCell(Text(trade["qty"].toStringAsFixed(2), style: TextStyle(color: Colors.white))),
+                                                    DataCell(
+                                                      Text(
+                                                        '\$${pnl.toStringAsFixed(4)}',
+                                                        style: TextStyle(
+                                                          color: pnl >= 0 ? Colors.green : Colors.red,
+                                                        ),
+                                                      ),
                                                     ),
-                                                  ),
-                                                ),
-                                                DataCell(Text('${trade["commission"].toStringAsFixed(7)} ${trade["commissionAsset"]}',
-                                                    style: TextStyle(color: Colors.white),
-                                                )),
-                                                DataCell(Text(formattedTime, style: TextStyle(color: Colors.white))),
-                                              ],
-                                            );
-                                        }).toList(),
+                                                    DataCell(Text('${trade["commission"].toStringAsFixed(7)} ${trade["commissionAsset"]}',
+                                                        style: TextStyle(color: Colors.white),
+                                                    )),
+                                                    DataCell(Text(formattedTime, style: TextStyle(color: Colors.white))),
+                                                  ],
+                                                );
+                                            }).toList(),
+                                          ),
                                       ),
                                     ),
                                   ),
@@ -1517,7 +1719,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _showToast("Already in training queue");
           return fullOptimizedPortfolio;
         }
-        await overmind.trainPortfolio(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0).then((_) {
+        await overmind.trainPortfolio(_overmindApiKey, 1, _maxTradeHorizon, 1.0, 1.0).then((_) {
             _showToast("Request to train portfolio added to the queue");
         });
     });
@@ -1697,7 +1899,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<Portfolio> _trainModel(Holding asset) async {
     final symbol = [ asset.instrument ];
-    return await overmind.trainSomeModels(_overmindApiKey, 10, _maxTradeHorizon, 1.0, 1.0, symbol);
+    return await overmind.trainSomeModels(_overmindApiKey, 1, _maxTradeHorizon, 1.0, 1.0, symbol);
   }
 
   Future<void> _resetModels(BuildContext context) async {
@@ -1797,7 +1999,7 @@ class _HomeScreenState extends State<HomeScreen> {
         drawer: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             return Drawer(
-              width: constraints.maxWidth * 0.55,
+              width: constraints.maxWidth * 0.45,
               // width: constraints.maxWidth * 0.75,
               child: StatefulBuilder(
                 builder: (BuildContext context, StateSetter setState) {
@@ -1861,7 +2063,7 @@ class _HomeScreenState extends State<HomeScreen> {
               auxTp: _auxTp,
               auxSl: _auxSl,
               entryPrice: _entryPrice,
-              lastClose: candles?.last.close ?? 0.0,
+              lastClose: _lastClose,
             ),
           )
         ),

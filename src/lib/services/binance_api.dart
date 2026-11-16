@@ -6,6 +6,12 @@ import 'package:http/http.dart' as http;
 // import 'package:web_socket_channel/web_socket_channel.dart';
 // import 'package:uuid/uuid.dart';
 
+class BookPrice {
+  final double bid;
+  final double ask;
+  BookPrice(this.bid, this.ask);
+}
+
 class BinanceApi {
   final String baseUrl = 'https://api3.binance.com';
   final String futuresBaseUrl = 'https://fapi.binance.com';
@@ -43,6 +49,51 @@ class BinanceApi {
     }
   }
 
+  Future<Map<String, BookPrice>> getBookPrices(List<String> instruments) async {
+    if (instruments.isEmpty) return {};
+
+    final String endpoint = '/fapi/v1/ticker/bookTicker';
+
+    String url = '$futuresBaseUrl$endpoint';
+
+    if (instruments.length == 1) {
+      url += '?symbol=${instruments.first}';
+    } else {
+      String symbolsParam = jsonEncode(instruments);
+      url += '?symbols=$symbolsParam';
+    }
+
+    try {
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        final jsonData = jsonDecode(response.body);
+
+        if (jsonData is List) {
+          return {
+            for (var item in jsonData)
+            item['symbol'] as String: BookPrice(
+              double.tryParse(item['bidPrice'] ?? '0') ?? 0.0,
+              double.tryParse(item['askPrice'] ?? '0') ?? 0.0,
+            )
+          };
+        }
+        else if (jsonData is Map<String, dynamic>) {
+          return {
+            jsonData['symbol'] as String: BookPrice(
+              double.tryParse(jsonData['bidPrice'] ?? '0') ?? 0.0,
+              double.tryParse(jsonData['askPrice'] ?? '0') ?? 0.0,
+            )
+          };
+        }
+      }
+    } catch (e) {
+      print('Error fetching futures prices: $e');
+    }
+
+    return {};
+  }
+
   Future<Map<String, double>> getPrices(List<String> instruments) async {
     if (instruments.isEmpty) {
       return {};
@@ -68,26 +119,22 @@ class BinanceApi {
       try {
         jsonData = jsonDecode(response.body);
       } catch (e) {
-        // Handle JSON decode error
         return {};
       }
 
       // Check if the response is an array of prices
       if (jsonData is List) {
-        // Map each symbol and price to a key-value pair
         return {
           for (var item in jsonData)
           item['symbol'] as String: double.tryParse(item['price']) ?? 0.0
         };
       } else if (jsonData is Map<String, dynamic>) {
-        // If the response is a single object
         return {
           jsonData['symbol'] as String: double.tryParse(jsonData['price']) ?? 0.0,
         };
       }
     }
 
-    // Return empty map if the response is not successful
     return {};
   }
 
@@ -202,6 +249,63 @@ class BinanceApi {
     return allTrades;
   }
 
+  Future<List<Map<String, dynamic>>> getIncomeHistory(
+    String apiKey,
+    String secretKey,
+    DateTime startDate,
+    DateTime endDate) async {
+    final List<Map<String, dynamic>> allIncome = [];
+    final Duration maxTimeWindow = Duration(days: 7);
+    DateTime currentStartDate = startDate;
+
+    while (currentStartDate.isBefore(endDate)) {
+      try {
+        // Calculate chunk end date
+        DateTime chunkEndDate = currentStartDate.add(maxTimeWindow);
+        if (chunkEndDate.isAfter(endDate)) {
+          chunkEndDate = endDate;
+        }
+
+        final int now = DateTime.now().millisecondsSinceEpoch;
+        final Map<String, String> params = {
+          'timestamp': now.toString(),
+          'startTime': currentStartDate.millisecondsSinceEpoch.toString(),
+          'endTime': chunkEndDate.millisecondsSinceEpoch.toString(),
+          'limit': '1000', // max allowed
+        };
+
+        final String signature = createBinanceSignature(secretKey, params);
+        params['signature'] = signature;
+
+        const String endpoint = '/fapi/v1/income';
+        final Uri url = Uri.parse('$futuresBaseUrl$endpoint${Uri(queryParameters: params)}');
+        final headers = {
+          'X-MBX-APIKEY': apiKey,
+        };
+
+        final http.Response response = await http.get(url, headers: headers);
+
+        if (response.statusCode == 200) {
+          final List<dynamic> jsonResponse = jsonDecode(response.body);
+          allIncome.addAll(jsonResponse.cast<Map<String, dynamic>>());
+
+          await Future.delayed(Duration(milliseconds: 100));
+        } else {
+          print('Error for period $currentStartDate to $chunkEndDate: ${jsonDecode(response.body)}');
+          throw Exception('Failed to fetch income history');
+        }
+
+        // Move to next chunk
+        currentStartDate = chunkEndDate;
+      } catch (error) {
+        print('Error fetching income history for period $currentStartDate: $error');
+        currentStartDate = currentStartDate.add(maxTimeWindow);
+      }
+    }
+
+    return allIncome;
+  }
+
   Future<Map<String, dynamic>> cancelOrder(String apiKey, String secretKey, String orderId, String symbol) async {
     try {
       final int now = DateTime.now().millisecondsSinceEpoch;
@@ -210,11 +314,13 @@ class BinanceApi {
         'orderId': orderId,
         'symbol': symbol,
         'timestamp': now.toString(),
+        // 'algoType': 'CONDITIONAL'
       };
 
       final String signature = createBinanceSignature(secretKey, params);
       params['signature'] = signature;
 
+      // final String endpoint = '/fapi/v1/algoOrder';
       final String endpoint = '/fapi/v1/order';
       final Uri url = Uri.parse('$futuresBaseUrl$endpoint${Uri(queryParameters: params)}');
       final headers = {
@@ -279,15 +385,19 @@ class BinanceApi {
       'side': side,
       'quantity': quantity,
       'type': type,
-      'stopPrice': stopPrice,
+      // 'stopPrice': stopPrice,
+      'triggerPrice': stopPrice,
       'reduceOnly': 'true',
       'timestamp': now.toString(),
+      'algoType': 'CONDITIONAL',
+      'workingType': 'MARK_PRICE'
     };
 
     final signature = createBinanceSignature(secretKey, params);
     params['signature'] = signature;
 
-    final String endpoint = '/fapi/v1/order';
+    final String endpoint = '/fapi/v1/algoOrder';
+    // final String endpoint = '/fapi/v1/order';
     final Uri url = Uri.parse('$futuresBaseUrl$endpoint${Uri(queryParameters: params)}');
     final headers = {
       'X-MBX-APIKEY': apiKey,
@@ -332,11 +442,13 @@ class BinanceApi {
       'quantity': quantity,
       'type': 'MARKET',
       'timestamp': now.toString(),
+      // 'algoType': 'CONDITIONAL'
     };
 
     final signature = createBinanceSignature(secretKey, params);
     params['signature'] = signature;
 
+    // final String endpoint = '/fapi/v1/algoOrder';
     final String endpoint = '/fapi/v1/order';
     final Uri url = Uri.parse('$futuresBaseUrl$endpoint${Uri(queryParameters: params)}');
     final headers = {
@@ -365,7 +477,10 @@ class BinanceApi {
         'X-MBX-APIKEY': apiKey,
       };
 
-      final http.Response response = await http.get(url, headers: headers);
+      final http.Response response = await http.get(url, headers: headers).timeout(const Duration(seconds: 30), onTimeout: () {
+          // Handle timeout
+          throw Exception('The connection has timed out!');
+      });
 
       if (response.statusCode == 200) {
         final positions = jsonDecode(response.body);
@@ -525,7 +640,7 @@ class BinanceApi {
       final String signature = createBinanceSignature(secretKey, params);
       params['signature'] = signature;
 
-      final String endpoint = '/fapi/v1/openOrders';
+      final String endpoint = '/fapi/v1/openAlgoOrders';
       final Uri url = Uri.parse('$futuresBaseUrl$endpoint${Uri(queryParameters: params)}');
       final headers = {
         'X-MBX-APIKEY': apiKey,

@@ -161,7 +161,7 @@ class _PositionsDialogContentState extends State<_PositionsDialogContent> {
     final positions = (openPositions['portfolio'] as List<dynamic>)
     .map((position) => PositionData.fromJson(
         position,
-        widget.fullOptimizedPortfolio.getHolding(position['symbol'], '1h'),
+        widget.fullOptimizedPortfolio.getHolding(position['symbol'], '5m'),
     ))
     .toList()
     ..sort((a, b) => b.unrealizedProfit.compareTo(a.unrealizedProfit));
@@ -174,7 +174,6 @@ class _PositionsDialogContentState extends State<_PositionsDialogContent> {
     );
   }
 }
-
 
 class _BalanceInfoSection extends StatelessWidget {
   final double totalBalance;
@@ -362,6 +361,8 @@ class _PositionsTable extends StatelessWidget {
   }
 
   Widget _buildProgressIndicator(double distance, bool isTP) {
+    distance = isTP ? 100.0 - distance.abs() : 100.0 - distance.abs();
+    // print("$isTP: $distance");
     return Center(
       child: RotatedBox(
         quarterTurns: isTP ? 2 : 0,
@@ -370,7 +371,8 @@ class _PositionsTable extends StatelessWidget {
           minHeight: 20,
           backgroundColor: Colors.grey[300],
           valueColor: AlwaysStoppedAnimation<Color>(
-            distance > 60.0 ? Colors.red : Colors.blue,
+            // distance > 60.0 ? Colors.red : Colors.blue,
+            isTP ? Colors.blue : Colors.red,
           ),
         ),
       ),
