@@ -1,278 +1,79 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import '../services/overmind_api.dart';
-import '../widgets/optimization_settings.dart';
 
-class PositionData {
-  final String symbol;
-  final double positionAmt;
-  final double unrealizedProfit;
-  final double tpDistance;
-  final double slDistance;
-  final double initialMargin;
-  final double testingScore;
-  final double outputScore;
-  final double riskReward;
+import '../domain/action_result.dart';
+import '../domain/open_positions.dart';
 
-  PositionData({
-      required this.symbol,
-      required this.positionAmt,
-      required this.unrealizedProfit,
-      required this.tpDistance,
-      required this.slDistance,
-      required this.initialMargin,
-      required this.testingScore,
-      required this.outputScore,
-      required this.riskReward,
+/// Actions available on a resting position. Each takes the symbol and reports
+/// what the exchange did, so the caller can show the result.
+class PositionActions {
+  const PositionActions({
+    required this.viewPosition,
+    required this.updateTakeProfit,
+    required this.updateStopLoss,
+    required this.updateBoth,
+    required this.closePosition,
   });
 
-  factory PositionData.fromJson(Map<String, dynamic> json, Holding optimizedHolding) {
-    return PositionData(
-      symbol: json['symbol'] as String,
-      positionAmt: json['positionAmt'] as double,
-      unrealizedProfit: double.tryParse(json['unRealizedProfit'].toString()) ?? 0.0,
-      tpDistance: double.tryParse(json['tpDistance'].toString()) ?? 0.0,
-      slDistance: double.tryParse(json['slDistance'].toString()) ?? 0.0,
-      initialMargin: double.tryParse(json['initialMargin'].toString()) ?? 0.0,
-      testingScore: optimizedHolding.testingScore,
-      outputScore: optimizedHolding.outputScore,
-      riskReward: optimizedHolding.riskReward,
-    );
-  }
+  final ValueChanged<String> viewPosition;
+  final Future<ActionResult> Function(String symbol) updateTakeProfit;
+  final Future<ActionResult> Function(String symbol) updateStopLoss;
+  final Future<ActionResult> Function(String symbol) updateBoth;
+  final Future<ActionResult> Function(String symbol) closePosition;
 }
 
-class PortfolioOverview {
-  final double totalBalance;
-  final double availableBalance;
-  final double unrealizedProfit;
-  final List<PositionData> positions;
+/// Open positions and account balance, driven by the position tracker.
+class PositionsDialog extends StatelessWidget {
+  const PositionsDialog(
+      {required this.positions, required this.actions, super.key});
 
-  PortfolioOverview({
-      required this.totalBalance,
-      required this.availableBalance,
-      required this.unrealizedProfit,
-      required this.positions,
-  });
-}
-
-class PositionsDialog extends StatefulWidget {
-  final Future<void> Function() fetchOpenPositions;
-  final Future<void> Function() fetchPortfolio;
-  final Map<String, dynamic> openPositions;
-  final Portfolio fullOptimizedPortfolio;
-  final OptimizationSettings optimizationSettings;
-  final Function(String) onViewPosition;
-  final Function(BuildContext, String) onUpdateTakeProfit;
-  final Function(BuildContext, String) onUpdateStopLoss;
-  final Function(BuildContext, String) onUpdateBoth;
-  final Function(BuildContext, String) onClose;
-
-  const PositionsDialog({
-      Key? key,
-      required this.fetchOpenPositions,
-      required this.fetchPortfolio,
-      required this.openPositions,
-      required this.fullOptimizedPortfolio,
-      required this.optimizationSettings,
-      required this.onViewPosition,
-      required this.onUpdateTakeProfit,
-      required this.onUpdateStopLoss,
-      required this.onUpdateBoth,
-      required this.onClose,
-  }) : super(key: key);
-
-  @override
-  _PositionsDialogState createState() => _PositionsDialogState();
-}
-
-class _PositionsDialogState extends State<PositionsDialog> {
-  @override
-  Widget build(BuildContext context) {
-    return _PositionsDialogContent(
-      openPositions: widget.openPositions,
-      fullOptimizedPortfolio: widget.fullOptimizedPortfolio,
-      optimizationSettings: widget.optimizationSettings,
-      onViewPosition: widget.onViewPosition,
-      onUpdateTakeProfit: widget.onUpdateTakeProfit,
-      onUpdateStopLoss: widget.onUpdateStopLoss,
-      onUpdateBoth: widget.onUpdateBoth,
-      onClose: widget.onClose,
-    );
-  }
-}
-
-
-class _PositionsDialogContent extends StatefulWidget {
-  final Map<String, dynamic> openPositions;
-  final Portfolio fullOptimizedPortfolio;
-  final OptimizationSettings optimizationSettings;
-  final Function(String) onViewPosition;
-  final Function(BuildContext, String) onUpdateTakeProfit;
-  final Function(BuildContext, String) onUpdateStopLoss;
-  final Function(BuildContext, String) onUpdateBoth;
-  final Function(BuildContext, String) onClose;
-
-  const _PositionsDialogContent({
-      Key? key,
-      required this.openPositions,
-      required this.fullOptimizedPortfolio,
-      required this.optimizationSettings,
-      required this.onViewPosition,
-      required this.onUpdateTakeProfit,
-      required this.onUpdateStopLoss,
-      required this.onUpdateBoth,
-      required this.onClose,
-  }) : super(key: key);
-
-  @override
-  _PositionsDialogContentState createState() => _PositionsDialogContentState();
-}
-
-class _PositionsDialogContentState extends State<_PositionsDialogContent> {
-  @override
-  Widget build(BuildContext context) {
-    final portfolio = _buildPortfolioOverview(widget.openPositions);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: _PositionsTable(
-            positions: portfolio.positions,
-            optimizationSettings: widget.optimizationSettings,
-            onViewPosition: widget.onViewPosition,
-            onUpdateTakeProfit: widget.onUpdateTakeProfit,
-            onUpdateStopLoss: widget.onUpdateStopLoss,
-            onUpdateBoth: widget.onUpdateBoth,
-            onClose: widget.onClose,
-          ),
-        ),
-        const SizedBox(width: 16),
-        _BalanceInfoSection(
-          totalBalance: portfolio.totalBalance,
-          availableBalance: portfolio.availableBalance,
-          unrealizedProfit: portfolio.unrealizedProfit,
-          positionsCount: portfolio.positions.length,
-        ),
-      ],
-    );
-  }
-
-  PortfolioOverview _buildPortfolioOverview(Map<String, dynamic> openPositions) {
-    final positions = (openPositions['portfolio'] as List<dynamic>)
-    .map((position) => PositionData.fromJson(
-        position,
-        widget.fullOptimizedPortfolio.getHolding(position['symbol'], '5m'),
-    ))
-    .toList()
-    ..sort((a, b) => b.unrealizedProfit.compareTo(a.unrealizedProfit));
-
-    return PortfolioOverview(
-      totalBalance: openPositions['totalBalance'] as double,
-      availableBalance: openPositions['availableBalance'] as double,
-      unrealizedProfit: openPositions['unRealizedProfit'] as double,
-      positions: positions,
-    );
-  }
-}
-
-class _BalanceInfoSection extends StatelessWidget {
-  final double totalBalance;
-  final double availableBalance;
-  final double unrealizedProfit;
-  final int positionsCount;
-
-  const _BalanceInfoSection({
-      required this.totalBalance,
-      required this.availableBalance,
-      required this.unrealizedProfit,
-      required this.positionsCount,
-  });
+  final ValueListenable<OpenPositions> positions;
+  final PositionActions actions;
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Card(
-          color: Colors.grey[800],
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: IntrinsicWidth(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildBalanceRow('Total Balance:', totalBalance),
-                  SizedBox(height: 4),
-                  _buildBalanceRow('Available Balance:', availableBalance),
-                  SizedBox(height: 4),
-                  _buildBalanceRow('Unrealized Profit:', unrealizedProfit),
-                  SizedBox(height: 4),
-                  _buildBalanceRow('Open Positions:', positionsCount, isCount: true),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+    return ValueListenableBuilder<OpenPositions>(
+      valueListenable: positions,
+      builder: (context, snapshot, _) {
+        final sorted = [...snapshot.positions]
+          ..sort((a, b) => b.unrealizedProfit.compareTo(a.unrealizedProfit));
 
-  Widget _buildBalanceRow(String label, dynamic value, {bool isCount = false}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(label, style: const TextStyle(color: Colors.white)),
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _PositionsTable(positions: sorted, actions: actions),
             ),
-          ),
-          SizedBox(width: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: Text(
-              isCount ? value.toString() : '\$${value.toStringAsFixed(2)}',
-              style: TextStyle(
-                color: label.contains('Profit')
-                ? (value >= 0 ? Colors.green : Colors.red)
-                : Colors.white,
-              ),
-            ),
-          ),
-        ],
-      ),
+            const SizedBox(width: 16),
+            _BalanceCard(snapshot),
+          ],
+        );
+      },
     );
   }
 }
 
 class _PositionsTable extends StatelessWidget {
-  final List<PositionData> positions;
-  final OptimizationSettings optimizationSettings;
-  final Function(String) onViewPosition;
-  final Function(BuildContext, String) onUpdateTakeProfit;
-  final Function(BuildContext, String) onUpdateStopLoss;
-  final Function(BuildContext, String) onUpdateBoth;
-  final Function(BuildContext, String) onClose;
+  const _PositionsTable({required this.positions, required this.actions});
 
-  const _PositionsTable({
-    required this.positions,
-    required this.optimizationSettings,
-    required this.onViewPosition,
-    required this.onUpdateTakeProfit,
-    required this.onUpdateStopLoss,
-    required this.onUpdateBoth,
-    required this.onClose,
-  });
+  final List<PositionSnapshot> positions;
+  final PositionActions actions;
+
+  static const List<String> _titles = [
+    'Actions',
+    'Symbol',
+    'TP Filled %',
+    'SL Filled %',
+    'Profit',
+    'Margin',
+  ];
 
   @override
   Widget build(BuildContext context) {
     if (positions.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(16.0),
+      return const Padding(
+        padding: EdgeInsets.all(16),
         child: Center(
           child: Text(
             'No open positions to display',
@@ -293,97 +94,172 @@ class _PositionsTable extends StatelessWidget {
         child: DataTable(
           showCheckboxColumn: false,
           columnSpacing: 24,
-          columns: _buildColumns(),
-          rows: positions.map((position) => _buildRow(context, position)).toList(),
+          columns: [
+            for (final title in _titles)
+              DataColumn(
+                label: Text(title, style: const TextStyle(color: Colors.white)),
+              ),
+          ],
+          rows: [
+            for (final position in positions)
+              DataRow(
+                cells: [
+                  DataCell(_ActionButtons(position.symbol, actions)),
+                  DataCell(
+                    Text(position.symbol,
+                        style: const TextStyle(color: Colors.white)),
+                  ),
+                  DataCell(_ProgressBar(position.takeProfitProgress,
+                      isTakeProfit: true)),
+                  DataCell(_ProgressBar(position.stopLossProgress,
+                      isTakeProfit: false)),
+                  DataCell(_ProfitText(position.unrealizedProfit)),
+                  DataCell(
+                    Text(
+                      position.marginLabel,
+                      style: TextStyle(
+                        color: position.isLong ? Colors.green : Colors.red,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
         ),
       ),
     );
   }
+}
 
-  List<DataColumn> _buildColumns() {
-    return const [
-      DataColumn(label: Text('Actions', style: TextStyle(color: Colors.white))),
-      DataColumn(label: Text('Symbol', style: TextStyle(color: Colors.white))),
-      DataColumn(label: Text('TP Filled %', style: TextStyle(color: Colors.white))),
-      DataColumn(label: Text('SL Filled %', style: TextStyle(color: Colors.white))),
-      DataColumn(label: Text('Profit', style: TextStyle(color: Colors.white))),
-      DataColumn(label: Text('Margin', style: TextStyle(color: Colors.white))),
-    ];
-  }
+class _ActionButtons extends StatelessWidget {
+  const _ActionButtons(this.symbol, this.actions);
 
-  DataRow _buildRow(BuildContext context, PositionData position) {
-    return DataRow(
-      cells: [
-        DataCell(_buildActionButtons(context, position.symbol)),
-        DataCell(Text(position.symbol, style: const TextStyle(color: Colors.white))),
-        DataCell(_buildProgressIndicator(position.tpDistance, true)),
-        DataCell(_buildProgressIndicator(position.slDistance, false)),
-        DataCell(_buildProfitText(position.unrealizedProfit)),
-        DataCell(Text(
-          '${position.positionAmt > 0 ? "+" : "-"}\$${position.initialMargin.toStringAsFixed(2)}',
-          style: position.positionAmt > 0 ? const TextStyle(color: Colors.green) : const TextStyle(color: Colors.red),
-        )),
-      ],
-    );
-  }
+  final String symbol;
+  final PositionActions actions;
 
-  Widget _buildActionButtons(BuildContext context, String symbol) {
+  @override
+  Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          icon: const Icon(Icons.visibility, color: Colors.white),
-          tooltip: 'View Position',
-          onPressed: () => onViewPosition(symbol),
-        ),
-        IconButton(
-          icon: const Icon(Icons.trending_up, color: Colors.blue),
-          tooltip: 'Update TP',
-          onPressed: () => onUpdateTakeProfit(context, symbol),
-        ),
-        IconButton(
-          icon: const Icon(Icons.trending_down, color: Colors.orange),
-          tooltip: 'Update SL',
-          onPressed: () => onUpdateStopLoss(context, symbol),
-        ),
-        IconButton(
-          icon: const Icon(Icons.edit, color: Colors.green),
-          tooltip: 'Update Both',
-          onPressed: () => onUpdateBoth(context, symbol),
-        ),
-        IconButton(
-          icon: const Icon(Icons.cancel, color: Colors.red),
-          tooltip: 'Close Position',
-          onPressed: () => onClose(context, symbol),
-        ),
+        _button(Icons.visibility, 'View Position', Colors.white,
+            () => actions.viewPosition(symbol)),
+        _button(Icons.trending_up, 'Update TP', Colors.blue,
+            () => actions.updateTakeProfit(symbol)),
+        _button(Icons.trending_down, 'Update SL', Colors.orange,
+            () => actions.updateStopLoss(symbol)),
+        _button(Icons.edit, 'Update Both', Colors.green,
+            () => actions.updateBoth(symbol)),
+        _button(Icons.cancel, 'Close Position', Colors.red,
+            () => actions.closePosition(symbol)),
       ],
     );
   }
 
-  Widget _buildProgressIndicator(double distance, bool isTP) {
-    distance = isTP ? 100.0 - distance.abs() : 100.0 - distance.abs();
-    // print("$isTP: $distance");
+  Widget _button(
+      IconData icon, String tooltip, Color color, VoidCallback onPressed) {
+    return IconButton(
+      icon: Icon(icon, color: color),
+      tooltip: tooltip,
+      onPressed: onPressed,
+    );
+  }
+}
+
+/// Fill of a resting level: 0 means untouched, 1 means the level is reached.
+class _ProgressBar extends StatelessWidget {
+  const _ProgressBar(this.progress, {required this.isTakeProfit});
+
+  final double progress;
+  final bool isTakeProfit;
+
+  @override
+  Widget build(BuildContext context) {
     return Center(
       child: RotatedBox(
-        quarterTurns: isTP ? 2 : 0,
+        // Take-profit runs away from the entry on one side, stop-loss on the
+        // other, so the bar is rotated for the take-profit only.
+        quarterTurns: isTakeProfit ? 2 : 0,
         child: LinearProgressIndicator(
-          value: 1.0 - (distance / 100),
+          value: (progress / 100).clamp(0, 1),
           minHeight: 20,
           backgroundColor: Colors.grey[300],
           valueColor: AlwaysStoppedAnimation<Color>(
-            // distance > 60.0 ? Colors.red : Colors.blue,
-            isTP ? Colors.blue : Colors.red,
+            isTakeProfit ? Colors.blue : Colors.red,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfitText extends StatelessWidget {
+  const _ProfitText(this.profit);
+
+  final double profit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      '\$${profit.toStringAsFixed(4)}',
+      style: TextStyle(color: profit >= 0 ? Colors.green : Colors.red),
+    );
+  }
+}
+
+class _BalanceCard extends StatelessWidget {
+  const _BalanceCard(this.snapshot);
+
+  final OpenPositions snapshot;
+
+  @override
+  Widget build(BuildContext context) {
+    final balance = snapshot.balance;
+    final profitColor =
+        balance.unrealizedProfit >= 0 ? Colors.green : Colors.red;
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Card(
+          color: Colors.grey[800],
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: IntrinsicWidth(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _row('Total Balance:', balance.totalFormatted, Colors.white),
+                  const SizedBox(height: 4),
+                  _row('Available Balance:', balance.availableFormatted,
+                      Colors.white),
+                  const SizedBox(height: 4),
+                  _row('Unrealized Profit:', balance.profitFormatted,
+                      profitColor),
+                  const SizedBox(height: 4),
+                  _row('Open Positions:', '${snapshot.count}', Colors.white),
+                ],
+              ),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildProfitText(double profit) {
-    return Text(
-      '\$${profit.toStringAsFixed(4)}',
-      style: TextStyle(
-        color: profit >= 0 ? Colors.green : Colors.red,
+  Widget _row(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+              child: Text(label, style: const TextStyle(color: Colors.white))),
+          const SizedBox(width: 10),
+          Text(value, style: TextStyle(color: color)),
+        ],
       ),
     );
   }

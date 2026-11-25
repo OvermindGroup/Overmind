@@ -1,888 +1,283 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
-import 'dart:math' show max;
-import 'package:audioplayers/audioplayers.dart';
-import 'package:collection/collection.dart';
 
-final player = AudioPlayer();
+import '../domain/market_data.dart';
+import '../domain/portfolio.dart';
+import '../utils/log.dart';
 
-class Holding {
-  final double takeProfit;
-  final double stopLoss;
-  final double riskReward;
-  final int horizon;
-  final double testingScore;
-  final String instrument;
-  final String timeframe;
-  final String horizonFormatted;
-  final double allocation;
-  final double trainingScore;
-  final double outputScore;
-  final double outputDelta;
-  final double outputActivation;
-  final List<dynamic> lastTrades;
-  final double tpVolPerc;
-  final double slVolPerc;
-  final double direction1;
-  final double direction2;
-  final double tpLower;
-  final double tpUpper;
+/// A failed Overmind server request.
+class OvermindException implements Exception {
+  const OvermindException(this.endpoint, this.statusCode, this.body);
 
-  Holding({
-      required this.takeProfit,
-      required this.stopLoss,
-      required this.riskReward,
-      required this.horizon,
-      required this.testingScore,
-      required this.instrument,
-      required this.timeframe,
-      required this.horizonFormatted,
-      required this.allocation,
-      required this.trainingScore,
-      required this.outputScore,
-      required this.outputDelta,
-      required this.outputActivation,
-      required this.lastTrades,
-      required this.tpVolPerc,
-      required this.slVolPerc,
-      required this.direction1,
-      required this.direction2,
-      required this.tpLower,
-      required this.tpUpper,
-  });
-
-  double calculateTradeFactor() {
-    double factor;
-    final outputScore = this.outputScore;
-
-    if (outputScore < 0.6) {
-      factor = 0.0;
-    } else if (outputScore >= 0.8) {
-      factor = 1.0;
-    } else {
-      factor = 0.5 + ((outputScore - 0.6) / (0.8 - 0.6)) * 0.5;
-    }
-
-    return factor;
-  }
-
-  factory Holding.fromJson(Map<String, dynamic> json) {
-    return Holding(
-      takeProfit: json['takeProfit'],
-      stopLoss: json['stopLoss'],
-      riskReward: json['riskReward'],
-      horizon: json['horizon'].toInt(),
-      testingScore: json['testingScore'].toDouble(),
-      instrument: json['instrument'],
-      timeframe: json['timeframe'],
-      horizonFormatted: json['horizonFormatted'],
-      allocation: json['allocation'].toDouble(),
-      trainingScore: json['trainingScore'].toDouble(),
-      outputScore: json['outputScore'].toDouble(),
-      outputDelta: json['outputDelta'].toDouble(),
-      outputActivation: json['outputActivation'].toDouble(),
-      lastTrades: json['lastTrades'].toList() as List<dynamic>,
-      tpVolPerc: json['tpVolPerc'].toDouble(),
-      slVolPerc: json['slVolPerc'].toDouble(),
-      direction1: json['direction1'].toDouble(),
-      direction2: json['direction2'].toDouble(),
-      tpLower: json['tpLower'].toDouble(),
-      tpUpper: json['tpUpper'].toDouble(),
-    );
-  }
-}
-
-class Portfolio {
-  final List<Holding> holdings;
-  
-  // List<Holding> get holdings => _holdings;
-
-  Portfolio({required this.holdings});
-
-  factory Portfolio.fromJson(List<dynamic> json) {
-    json.map((item) => print(item));
-    List<Holding> holdings = json.map((item) => Holding.fromJson(item)).toList();
-    return Portfolio(holdings: holdings);
-  }
-
-  double get totalAllocation {
-    return holdings.fold(0, (sum, holding) => sum + holding.allocation);
-  }
-
-  List<String> get symbols {
-    return holdings.map((holding) => holding.instrument).toList();
-  }
-
-  double get averageRiskReward {
-    if (holdings.isEmpty) return 0;
-    double total = holdings.fold(0, (sum, holding) => sum + holding.riskReward);
-    return total / holdings.length;
-  }
-
-  Holding operator [](int index) {
-    if (index < 0 || index >= holdings.length) {
-      throw RangeError('Index out of bounds: $index');
-    }
-    return holdings[index];
-  }
-
-  Holding getHolding(String instrument, String timeframe) {
-    return holdings.firstWhere(
-      (holding) => holding.instrument == instrument && holding.timeframe == timeframe,
-      // orElse: () => throw StateError('Instrument $instrument not found in portfolio'),
-      orElse: () => Holding(
-        takeProfit: 0.0,
-        stopLoss: 0.0,
-        riskReward: 0.0,
-        horizon: 0,
-        testingScore: 0.0,
-        instrument: "",
-        timeframe: "",
-        horizonFormatted: "",
-        allocation: 0.0,
-        trainingScore: 0.0,
-        outputScore: 0.0,
-        outputDelta: 0.0,
-        outputActivation: 0.0,
-        lastTrades: [],
-        tpVolPerc: 0.0,
-        slVolPerc: 0.0,
-        direction1: 0.0,
-        direction2: 0.0,
-        tpLower: 0.0,
-        tpUpper: 0.0,
-      ),
-      // orElse: () => Holding(),
-    );
-  }
-
-  int get length => holdings.length;
-
-  bool get isEmpty {
-    return holdings.isEmpty;
-  }
-
-  // Portfolio map(Holding Function(Holding) f) {
-  //   List<Holding> newHoldings = holdings.map(f).toList();
-  //   return Portfolio(holdings: newHoldings);
-  // }
-  
-  List<T> map<T>(T Function(Holding) f) {
-    return holdings.map(f).toList();
-  }
-
-  void forEach(void Function(Holding) f) {
-    holdings.forEach(f);
-  }
-
-  Portfolio where(bool Function(Holding) test) {
-    List<Holding> newHoldings = holdings.where(test).toList();
-    return Portfolio(holdings: newHoldings);
-  }
-
-  Portfolio filterByScores(
-    double minRiskReward,
-    double maxRiskReward,
-    double minTestingScore,
-    double minOutputScore,
-    double minTpVolPerc,
-    double minSlVolPerc
-  ) {
-    List<Holding> filteredHoldings = holdings.where((holding) {
-        // Check if holding meets all the score criteria
-        return holding.riskReward >= minRiskReward &&
-        holding.riskReward <= maxRiskReward &&
-        holding.testingScore >= minTestingScore &&
-        holding.outputScore >= minOutputScore &&
-        holding.tpVolPerc.abs() >= minTpVolPerc &&
-        holding.slVolPerc.abs() >= minSlVolPerc;
-    }).toList();
-
-    // Return a new Portfolio with filtered holdings
-    return Portfolio(holdings: filteredHoldings);
-  }
-
-  Portfolio filterStagnated(Map<String, List<double>> bounds, double minTpSlPadding) {
-    List<Holding> filteredHoldings = holdings.where((holding) {
-        List<double>? instrumentBounds = bounds[holding.instrument];
-
-        if (instrumentBounds == null || instrumentBounds.length != 2) {
-          return false;
-        }
-
-        double lowerBound = instrumentBounds[0];
-        double upperBound = instrumentBounds[1];
-
-        // Apply the padding as a percentage of the boundaries
-        double paddedLowerBound = lowerBound * (1 + minTpSlPadding);
-        double paddedUpperBound = upperBound * (1 - minTpSlPadding);
-
-        return holding.takeProfit > paddedLowerBound &&
-        holding.takeProfit < paddedUpperBound &&
-        holding.stopLoss > paddedLowerBound &&
-        holding.stopLoss < paddedUpperBound &&
-        holding.stopLoss != 0 &&
-        holding.takeProfit != 0;
-    }).toList();
-
-    // Return a new Portfolio with filtered holdings
-    return Portfolio(holdings: filteredHoldings);
-  }
-
-  Portfolio filterTrending(Map<String, List<double>> bounds) {
-    List<Holding> filteredHoldings = holdings.where((holding) {
-        List<double>? instrumentBounds = bounds[holding.instrument];
-        if (instrumentBounds == null || instrumentBounds.length != 2) {
-          return false;
-        }
-
-        double lowerBound = instrumentBounds[0];
-        double upperBound = instrumentBounds[1];
-
-        bool isTakeProfitTrending = (holding.takeProfit > lowerBound && holding.takeProfit > upperBound) ||
-        (holding.takeProfit < lowerBound && holding.takeProfit < upperBound);
-
-        return isTakeProfitTrending;
-    }).toList();
-
-    return Portfolio(holdings: filteredHoldings);
-  }
-
-  Portfolio filterMinTpSl(Map<String, List<double>> bounds, double percentage) {
-    List<Holding> filteredHoldings = holdings.where((holding) {
-        List<double>? instrumentBounds = bounds[holding.instrument];
-        if (instrumentBounds == null || instrumentBounds.length != 2) {
-          return false;
-        }
-
-        double lowerBound = instrumentBounds[0];
-        double upperBound = instrumentBounds[1];
-
-        double maxAbsBound = max(lowerBound.abs(), upperBound.abs());
-
-        double minThreshold = maxAbsBound * percentage;
-
-        return holding.takeProfit.abs() > minThreshold && holding.stopLoss.abs() > minThreshold;
-    }).toList();
-
-    return Portfolio(holdings: filteredHoldings);
-  }
-
-  void filterTop(int n) {
-    holdings.removeWhere((holding) {
-        if (holding.takeProfit > 0) {
-          return !(holding.direction1 > 0 && holding.direction2 < 0);
-        } else if (holding.takeProfit < 0) {
-          return !(holding.direction1 < 0 && holding.direction2 > 0);
-        }
-        return true;
-    });
-
-    // Then, apply your existing score-based trimming
-    while (holdings.length > n) {
-      // Remove lowest testingScore
-      Holding? lowestTestingScore = holdings.reduce(
-        (a, b) => a.testingScore < b.testingScore ? a : b,
-      );
-      holdings.remove(lowestTestingScore);
-
-      if (holdings.length <= n) break;
-
-      // Remove lowest outputScore
-      Holding? lowestOutputScore = holdings.reduce(
-        (a, b) => a.outputScore < b.outputScore ? a : b,
-      );
-      holdings.remove(lowestOutputScore);
-    }
-  }
-
-  void filterBest() {
-    const double dirThreshold = 0.50;
-    const double minOutputScore = 0.60;
-    const int minHighScoring = 0;
-
-    Holding? fallbackHolding;
-    for (var h in holdings) {
-      if (h.outputScore < minOutputScore) {
-        if (fallbackHolding == null || h.outputScore > fallbackHolding.outputScore) {
-          fallbackHolding = h;
-        }
-      }
-    }
-
-    final highScoreHoldings = holdings.where((h) => h.outputScore >= minOutputScore).toList();
-
-    holdings.removeWhere((holding) {
-        // if (holding.tpLower <= 0.0 || holding.tpUpper <= 0.0) return true;
-        if (holding.tpLower <= 0.0 || holding.tpUpper <= 0.0) return true;
-
-        final bool scoreOk = holding.outputScore >= minOutputScore;
-
-        // final bool directionOk = (holding.takeProfit > 0 && holding.direction1 > 0 && holding.direction2 <= 0) ||
-        // (holding.takeProfit > 0 && holding.direction1 > 0 && holding.direction2 > 0) ||
-        // (holding.takeProfit < 0 && holding.direction1 < 0 && holding.direction2 >= 0) ||
-        // (holding.takeProfit < 0 && holding.direction1 < 0 && holding.direction2 < 0);
-
-        final bool directionOk =
-        (holding.takeProfit > 0 && holding.direction1 > dirThreshold && holding.direction2 < -dirThreshold) ||
-        (holding.takeProfit < 0 && holding.direction1 < -dirThreshold && holding.direction2 > dirThreshold);
-        // final bool directionOk = true;
-
-        return !(directionOk && scoreOk);
-    });
-
-    // if (highScoreHoldings.length < minHighScoring) {
-    //   holdings.clear();
-    //   return;
-    // }
-
-    // int upCount = highScoreHoldings.where((h) => h.takeProfit > 0).length;
-    // int downCount = highScoreHoldings.where((h) => h.takeProfit < 0).length;
-
-    // if (upCount > downCount) {
-    //   holdings.removeWhere((h) => h.takeProfit < 0);
-    // } else if (downCount > upCount) {
-    //   holdings.removeWhere((h) => h.takeProfit > 0);
-    // } else {
-    //   if (fallbackHolding == null || fallbackHolding.takeProfit == 0) {
-    //     holdings.clear();
-    //   } else if (fallbackHolding.takeProfit > 0) {
-    //     holdings.removeWhere((h) => h.takeProfit < 0);
-    //   } else {
-    //     holdings.removeWhere((h) => h.takeProfit > 0);
-    //   }
-    // }
-  }
-
-  Portfolio filterOutSymbols(List<String> symbolsToExclude) {
-    List<Holding> filteredHoldings = holdings.where(
-      (holding) => !symbolsToExclude.contains(holding.instrument)
-    ).toList();
-
-    return Portfolio(holdings: filteredHoldings);
-  }
-
-  static List<Holding> sortHoldings(List<Holding> holdings, Map<String, double> rho) {
-    List<({Holding holding, double mean})> holdingMeans = holdings.map((holding) {
-        double rhoValue = rho[holding.instrument] ?? 0.0;
-        // double mean = (rhoValue + holding.outputScore + holding.outputDelta) / 3.0;
-        double mean = (holding.outputScore + holding.outputActivation) / 2.0;
-        return (holding: holding, mean: mean);
-    }).toList();
-
-    holdingMeans.sort((a, b) => b.mean.compareTo(a.mean));
-
-    return holdingMeans.map((e) => e.holding).toList();
-  }
+  final String endpoint;
+  final int statusCode;
+  final String body;
 
   @override
-  String toString() {
-    if (holdings.isEmpty) {
-      return "Empty Portfolio";
-    }
-
-    // Determine the width of each column
-    int instrumentWidth = max(
-      holdings.map((h) => h.instrument.length).reduce(max),
-      'Instrument'.length
-    );
-    int allocationWidth = max(
-      holdings.map((h) => h.allocation.toStringAsFixed(2).length).reduce(max),
-      'Allocation'.length
-    );
-    int profitWidth = max(
-      holdings.map((h) => h.takeProfit.toStringAsFixed(8).length).reduce(max),
-      'Take Profit'.length
-    );
-    int lossWidth = max(
-      holdings.map((h) => h.stopLoss.toStringAsFixed(8).length).reduce(max),
-      'Stop Loss'.length
-    );
-    int outputScoreWidth = max(
-      holdings.map((h) => h.outputScore.toStringAsFixed(2).length).reduce(max),
-      'Output Score'.length
-    );
-    int outputDeltaWidth = max(
-      holdings.map((h) => h.outputDelta.toStringAsFixed(2).length).reduce(max),
-      'Output Delta'.length
-    );
-    int testingScoreWidth = max(
-      holdings.map((h) => h.testingScore.toStringAsFixed(2).length).reduce(max),
-      'Testing Score'.length
-    );
-
-    // Create the header
-    String header = '|${' Instrument '.padRight(instrumentWidth + 1)}|' +
-    '${' Allocation '.padRight(allocationWidth + 1)}|' +
-    '${' Take Profit '.padRight(profitWidth + 1)}|' +
-    '${' Stop Loss '.padRight(lossWidth + 1)}|' +
-    '${' Output Score '.padRight(outputScoreWidth + 1)}|' +
-    '${' Dir1 '.padRight(outputDeltaWidth + 1)}|' +
-    '${' Dir2 '.padRight(testingScoreWidth + 1)}|';
-
-    // Create the separator line
-    String separator = '+${'-' * (instrumentWidth + 2)}+' +
-    '${'-' * (allocationWidth + 2)}+' +
-    '${'-' * (profitWidth + 2)}+' +
-    '${'-' * (lossWidth + 2)}+' +
-    '${'-' * (outputScoreWidth + 2)}+' +
-    '${'-' * (outputDeltaWidth + 2)}+' +
-    '${'-' * (testingScoreWidth + 2)}+';
-
-    // Create the rows
-    List<String> rows = holdings.map((holding) =>
-      '| ${holding.instrument.padRight(instrumentWidth)} |' +
-      ' ${holding.allocation.toStringAsFixed(2).padLeft(allocationWidth)} |' +
-      ' ${holding.takeProfit.toStringAsFixed(8).padLeft(profitWidth)} |' +
-      ' ${holding.stopLoss.toStringAsFixed(8).padLeft(lossWidth)} |' +
-      ' ${holding.outputScore.toStringAsFixed(2).padLeft(outputScoreWidth)} |' +
-      ' ${holding.direction1.toStringAsFixed(2).padLeft(outputDeltaWidth)} |' +
-      ' ${holding.direction2.toStringAsFixed(2).padLeft(testingScoreWidth)} |'
-    ).toList();
-
-    // Combine all parts
-    return '\n' + [separator, header, separator, ...rows, separator].join('\n');
-  }
+  String toString() => 'Overmind $endpoint failed ($statusCode): $body';
 }
 
-class OvermindApi {
-  // final String baseUrl = 'http://localhost:1989';
-  // final String baseUrl = 'https://overmind.pagekite.me';
-  final String baseUrl = 'http://172.20.23.250:1989';
-  final String env = '1';
+/// Parameters for a training run.
+class TrainingRequest {
+  const TrainingRequest({
+    required this.iterations,
+    required this.maxTradeHorizon,
+    required this.takeProfitPercentage,
+    required this.stopLossPercentage,
+  });
 
-  Future<Portfolio> trainPortfolio(
-    String apiKey,
-    int iterations,
-    int maxTradeHorizon,
-    double tpPercentage,
-    double slPercentage,
-  ) async {
-    try {
-      final Map<String, dynamic> requestBody = {
+  final int iterations;
+  final int maxTradeHorizon;
+  final double takeProfitPercentage;
+  final double stopLossPercentage;
+
+  Map<String, dynamic> toJson() => {
         'iterations': iterations,
         'maxTradeHorizon': maxTradeHorizon,
-        'tpPercentage': tpPercentage,
-        'slPercentage': slPercentage,
-      };
-      final String token = 'Bearer $apiKey';
-
-      final String endpoint = '/v1/models/$env/train';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-
-      final Map<String, String> headers = {
-        'Authorization': token,
-        'Content-Type': 'application/json',
+        'tpPercentage': takeProfitPercentage,
+        'slPercentage': stopLossPercentage,
       };
 
-      final http.Response response = await http.post(
-        url,
-        headers: headers,
-        body: jsonEncode(requestBody),
-      );
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        Portfolio portfolio = Portfolio.fromJson(jsonResponse);
-        return portfolio;
-      } else {
-        throw Exception('Failed to load portfolio data');
-      }
-    } catch (error) {
-      print('Error fetching optimized portfolio: $error');
-      return Portfolio(holdings: []);
-    }
-  }
-
-  Future<Portfolio> trainSomeModels(
-    String apiKey,
-    int iterations,
-    int maxTradeHorizon,
-    double tpPercentage,
-    double slPercentage,
-    List<String> symbols,
-  ) async {
-    try {
-      final Map<String, String> params = {
+  Map<String, String> toQuery() => {
         'iterations': iterations.toString(),
         'maxTradeHorizon': maxTradeHorizon.toString(),
-        'tpPercentage': tpPercentage.toString(),
-        'slPercentage': slPercentage.toString(),
-        'symbols': symbols.join(","),
+        'tpPercentage': takeProfitPercentage.toString(),
+        'slPercentage': stopLossPercentage.toString(),
       };
-      final String token = 'Bearer $apiKey';
+}
 
-      final String endpoint = '/v1/models/$env/train';
-      final Uri url = Uri.parse('$baseUrl$endpoint${Uri(queryParameters: params)}');
+/// Client for the Overmind model server.
+///
+/// Reads that the UI cannot degrade (portfolio, symbols, candles, prices) throw;
+/// actions that can fail without breaking the dashboard (train, reset, queue
+/// checks) log and return an empty result, matching the previous behaviour.
+class OvermindApi {
+  OvermindApi({
+    http.Client? client,
+    String baseUrl = defaultBaseUrl,
+    String environment = defaultEnvironment,
+  })  : _client = client ?? http.Client(),
+        _baseUrl = baseUrl,
+        _environment = environment;
 
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
+  /// LAN address of the author's dev server. Override this for a deployment by
+  /// constructing the client with [baseUrl].
+  static const String defaultBaseUrl = 'http://172.20.23.250:1989';
+  static const String defaultEnvironment = '1';
 
-      final http.Response response = await http.get(url, headers: headers);
+  static const Duration _timeout = Duration(seconds: 30);
 
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        Portfolio portfolio = Portfolio.fromJson(jsonResponse);
-        return portfolio;
-      } else {
-        throw Exception('Failed to load portfolio data');
-      }
-    } catch (error) {
-      print('Error fetching optimized portfolio: $error');
-      return Portfolio(holdings: []);
-    }
+  final http.Client _client;
+  final String _baseUrl;
+  final String _environment;
+
+  /// Everything the user has been trained on, including signals that are not
+  /// tradable. Throws so a stale dashboard is reported instead of shown empty.
+  Future<Portfolio> getPortfolio(String apiKey) async {
+    final decoded =
+        await _request('GET', '$_modelsPath/outputs', apiKey: apiKey);
+    return Portfolio.fromJson(_asList(decoded));
   }
 
-  Future<Portfolio> resetModel(
+  Future<Portfolio> trainPortfolio(
+      String apiKey, TrainingRequest request) async {
+    return _swallow(
+      'training portfolio',
+      () async {
+        final decoded = await _request(
+          'POST',
+          '$_modelsPath/train',
+          apiKey: apiKey,
+          body: jsonEncode(request.toJson()),
+        );
+        return Portfolio.fromJson(_asList(decoded));
+      },
+      Portfolio.empty,
+    );
+  }
+
+  Future<Portfolio> trainSymbols(
     String apiKey,
-    String symbol,
+    TrainingRequest request,
+    List<String> symbols,
   ) async {
-    try {
-      final String token = 'Bearer $apiKey';
-
-      final String endpoint = '/v1/models/$env/reset';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final Map<String, String> queryParams = {
-        'instrument': symbol, // Pass the symbol as a query parameter
-      };
-
-      final Uri urlWithQuery = url.replace(queryParameters: queryParams);
-
-      final http.Response response = await http.post(urlWithQuery, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        Portfolio portfolio = Portfolio.fromJson(jsonResponse);
-        return portfolio;
-      } else {
-        throw Exception('Failed to refresh model for $symbol');
-      }
-    } catch (error) {
-      print('Error refreshing model for $symbol: $error');
-      return Portfolio(holdings: []); // Return an empty portfolio on failure
-    }
+    return _swallow(
+      'training models for ${symbols.join(',')}',
+      () async {
+        final decoded = await _request(
+          'GET',
+          '$_modelsPath/train',
+          apiKey: apiKey,
+          params: {...request.toQuery(), 'symbols': symbols.join(',')},
+        );
+        return Portfolio.fromJson(_asList(decoded));
+      },
+      Portfolio.empty,
+    );
   }
 
-  Future<Portfolio> resetModels(
+  Future<Portfolio> resetPortfolio(String apiKey) async {
+    return _swallow(
+      'resetting portfolio',
+      () async => Portfolio.fromJson(
+        _asList(await _request('POST', '$_modelsPath/reset', apiKey: apiKey)),
+      ),
+      Portfolio.empty,
+    );
+  }
+
+  Future<Portfolio> resetModel(String apiKey, String symbol) async {
+    return _swallow(
+      'resetting model for $symbol',
+      () async => Portfolio.fromJson(_asList(await _request(
+        'POST',
+        '$_modelsPath/reset',
+        apiKey: apiKey,
+        params: {'instrument': symbol},
+      ))),
+      Portfolio.empty,
+    );
+  }
+
+  Future<Portfolio> resetModels(String apiKey, List<String> symbols) async {
+    return _swallow(
+      'resetting models for ${symbols.join(',')}',
+      () async => Portfolio.fromJson(_asList(await _request(
+        'POST',
+        '$_modelsPath/reset',
+        apiKey: apiKey,
+        params: {'instruments': symbols.join(',')},
+      ))),
+      Portfolio.empty,
+    );
+  }
+
+  /// Symbols the server can trade. Throws so the symbol dropdown shows a real
+  /// failure instead of silently offering nothing.
+  Future<List<String>> getSymbols(String apiKey) async {
+    final decoded =
+        _asMap(await _request('GET', '/v1/meta/symbols', apiKey: apiKey));
+    return _asList(decoded['crypto'])
+        .map((symbol) => symbol.toString())
+        .toList();
+  }
+
+  /// Whether a training run is already queued. Degrades to false: the worst
+  /// outcome is a duplicate request, not a blocked dashboard.
+  Future<bool> isTrainInQueue(String apiKey) async {
+    return _swallow(
+      'checking the training queue',
+      () async {
+        final decoded =
+            _asMap(await _request('GET', '/v1/models', apiKey: apiKey));
+        return decoded['inQueue'] == true;
+      },
+      false,
+    );
+  }
+
+  Future<AmheragData> getAmherag(
+      String apiKey, String symbol, String timeframe) async {
+    final decoded = _asMap(await _request(
+      'GET',
+      '/v1/indicators/amherag',
+      apiKey: apiKey,
+      params: {'symbol': symbol, 'timeframe': timeframe},
+    ));
+    return AmheragData.fromApi(decoded);
+  }
+
+  /// Close of the newest candle. Throws when unavailable: trading on a price of
+  /// zero would place orders with meaningless take-profit and stop-loss levels.
+  Future<double> getLatestPrice(String apiKey, String symbol) async {
+    final decoded = _asMap(await _request(
+      'GET',
+      '/v1/meta/latestPrice',
+      apiKey: apiKey,
+      params: {'symbol': symbol},
+    ));
+    return _asDouble(decoded['close']);
+  }
+
+  Future<Map<String, double>> getLatestPrices(
     String apiKey,
     List<String> symbols,
   ) async {
-    try {
-      final String token = 'Bearer $apiKey';
+    if (symbols.isEmpty) return {};
 
-      final String endpoint = '/v1/models/$env/reset';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final Map<String, String> queryParams = {
-        'instruments': symbols.join(","),
-      };
-
-      final Uri urlWithQuery = url.replace(queryParameters: queryParams);
-
-      final http.Response response = await http.post(urlWithQuery, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        Portfolio portfolio = Portfolio.fromJson(jsonResponse);
-        return portfolio;
-      } else {
-        throw Exception('Failed to refresh model for $symbols');
-      }
-    } catch (error) {
-      print('Error refreshing model for $symbols: $error');
-      return Portfolio(holdings: []); // Return an empty portfolio on failure
-    }
+    final decoded = _asMap(await _request(
+      'GET',
+      '/v1/meta/latestPrices',
+      apiKey: apiKey,
+      params: {'symbol': symbols.join(',')},
+    ));
+    return decoded.map((key, value) => MapEntry(key, _asDouble(value)));
   }
 
-  Future<Portfolio> resetPortfolio(
-    String apiKey
-  ) async {
-    try {
-      final String token = 'Bearer $apiKey';
-
-      final String endpoint = '/v1/models/$env/reset';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.post(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        Portfolio portfolio = Portfolio.fromJson(jsonResponse);
-        return portfolio;
-      } else {
-        throw Exception('Failed to reset portfolio data');
-      }
-    } catch (error) {
-      print('Error resetting portfolio: $error');
-      return Portfolio(holdings: []);
-    }
-  }
-
-  Future<List<String>> getSymbols(String apiKey) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/meta/symbols';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        Map<String, dynamic> decodedData = jsonDecode(response.body);
-
-        List<String> jsonResponse = (decodedData['crypto'] as List)
-        .map((e) => e.toString())
-        .toList();
-
-        return jsonResponse;
-      } else {
-        throw Exception('Failed to load available symbols');
-      }
-    } catch (error) {
-      print('Error fetching available symbols: $error');
-      throw error;
-    }
-  }
-
-  void printListWithIndentation(List<dynamic> list, {int indent = 0}) {
-    print('${' ' * indent}[');
-    for (var item in list) {
-      if (item is Map) {
-        printMapWithIndentation(item, indent: indent + 2);
-      } else if (item is List) {
-        printListWithIndentation(item, indent: indent + 2);
-      } else {
-        print('${' ' * (indent + 2)}$item');
-      }
-    }
-    print('${' ' * indent}]');
-  }
-
-  void printMapWithIndentation(Map<dynamic, dynamic> map, {int indent = 0}) {
-    print('${' ' * indent}{');
-    for (var entry in map.entries) {
-      if (entry.value is Map) {
-        print('${' ' * (indent + 2)}${entry.key}:');
-        printMapWithIndentation(entry.value, indent: indent + 4);
-      } else if (entry.value is List) {
-        print('${' ' * (indent + 2)}${entry.key}:');
-        printListWithIndentation(entry.value, indent: indent + 4);
-      } else {
-        print('${' ' * (indent + 2)}${entry.key}: ${entry.value}');
-      }
-    }
-    print('${' ' * indent}}');
-  }
-
-  Future<bool> isTrainInQueue(String apiKey) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/models';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-        return jsonResponse["inQueue"] as bool ?? false;
-      } else {
-        throw Exception('Failed to check if in training queue');
-      }
-    } catch (error) {
-      print('Error checking if in training queue: $error');
-      return false;
-    }
-  }
-
-  Future<Map<String, double>> getRho(String apiKey, List<String> instruments) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/indicators/correlation';
-      final String instrumentsParam = instruments.join(',');
-      final Map<String, String> queryParams = {
-        'symbols': instrumentsParam,
-      };
-      final Uri url = Uri.parse('$baseUrl$endpoint').replace(queryParameters: queryParams);
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> jsonResponse = jsonDecode(response.body);
-        Map<String, double> rhoMap = {};
-        jsonResponse.forEach((key, value) {
-            if (value is num) {
-              rhoMap[key] = value.toDouble();
-            } else {
-              print('Warning: Value for key "$key" is not a number.  Skipping.');
-            }
-        });
-        return rhoMap;
-      } else {
-        print('API Response: ${response.body}');
-        throw Exception('Failed to load rho results: ${response.statusCode}');
-      }
-    } catch (error) {
-      print('Error fetching rho results: $error');
-      throw error;
-    }
-  }
-
-  Future<Portfolio> getPortfolio(String apiKey) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/models/$env/outputs';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        return Portfolio.fromJson(jsonResponse);
-      } else {
-        throw Exception('Failed to load portfolio results');
-      }
-    } catch (error) {
-      print('Error fetching portfolio results: $error');
-      throw error;
-    }
-  }
-
-  Future<Portfolio> getFuturesPortfolio(String apiKey) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/models/$env/outputs';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        List<dynamic> jsonResponse = jsonDecode(response.body);
-        return Portfolio.fromJson(jsonResponse);
-      } else {
-        throw Exception('Failed to load portfolio results');
-      }
-    } catch (error) {
-      print('Error fetching portfolio results: $error');
-      return Portfolio(holdings: []);
-    }
-  }
-
-  Future<Map<String, dynamic>> getAmherag(String symbol, String timeframe, String apiKey) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/indicators/amherag?symbol=${symbol}&timeframe=${timeframe}';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        throw Exception('Failed to retrieve Amherag');
-      }
-    } catch (error) {
-      print('Error fetching Amherag: $error');
-      throw error;
-    }
-  }
-
-  Future<Map<String, dynamic>> getLatestPrice(String apiKey, String symbol) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/meta/latestPrice?symbol=${symbol}';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        throw Exception('Failed to retrieve latest price');
-      }
-    } catch (error) {
-      print('Error fetching latest price: $error');
-      return {};
-    }
-  }
-
-  Future<Map<String, double>> getLatestPrices(String apiKey, List<String> symbols) async {
-    try {
-      final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/meta/latestPrices?symbol=${symbols.join(",")}';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      final Map<String, String> headers = {
-        'Authorization': token,
-      };
-
-      final http.Response response = await http.get(url, headers: headers);
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> decoded = jsonDecode(response.body);
-        return decoded.map((key, value) {
-            double? price = double.tryParse(value.toString());
-            return MapEntry(key, price ?? 0.0);
-        });
-      } else {
-        throw Exception('Failed to retrieve latest price');
-      }
-    } catch (error) {
-      print('Error fetching latest price: $error');
-      throw error;
-    }
-  }
-
+  /// A free-tier key. Throws on failure so the API-key modal can tell the user
+  /// it did not work instead of storing an empty key.
   Future<String> getFreeTierApiKey() async {
-    try {
-      // final String token = 'Bearer $apiKey';
-      final String endpoint = '/v1/auth/token/free';
-      final Uri url = Uri.parse('$baseUrl$endpoint');
-      // final Map<String, String> headers = {
-      //   'Authorization': token,
-      // };
-
-      final http.Response response = await http.get(url);
-
-      if (response.statusCode == 200) {
-        return response.body;
-      } else {
-        throw Exception('Failed to retrieve free-tier API key');
-      }
-    } catch (error) {
-      print('Error fetching free-tier API key: $error');
-      return "";
+    final response = await _send('GET', '/v1/auth/token/free');
+    if (response.statusCode != 200) {
+      throw OvermindException(
+          '/v1/auth/token/free', response.statusCode, response.body);
     }
+    return response.body.trim();
+  }
+
+  String get _modelsPath => '/v1/models/$_environment';
+
+  Future<dynamic> _request(
+    String method,
+    String endpoint, {
+    String? apiKey,
+    Map<String, String>? params,
+    String? body,
+  }) async {
+    final response = await _send(method, endpoint,
+        apiKey: apiKey, params: params, body: body);
+    if (response.statusCode != 200) {
+      throw OvermindException(endpoint, response.statusCode, response.body);
+    }
+    return jsonDecode(response.body);
+  }
+
+  Future<http.Response> _send(
+    String method,
+    String endpoint, {
+    String? apiKey,
+    Map<String, String>? params,
+    String? body,
+  }) async {
+    final url =
+        Uri.parse('$_baseUrl$endpoint').replace(queryParameters: params);
+    final request = http.Request(method, url);
+    if (apiKey != null) request.headers['Authorization'] = 'Bearer $apiKey';
+    if (body != null) {
+      request.headers['Content-Type'] = 'application/json';
+      request.body = body;
+    }
+    final streamed = await _client.send(request).timeout(_timeout);
+    return http.Response.fromStream(streamed);
   }
 }
+
+Future<T> _swallow<T>(
+    String context, Future<T> Function() read, T fallback) async {
+  try {
+    return await read();
+  } catch (error) {
+    logError(context, error);
+    return fallback;
+  }
+}
+
+List<dynamic> _asList(Object? value) => value is List ? value : const [];
+
+Map<String, dynamic> _asMap(Object? value) =>
+    value is Map<String, dynamic> ? value : const {};
+
+double _asDouble(Object? value) => value is num
+    ? value.toDouble()
+    : double.tryParse(value?.toString() ?? '') ?? 0.0;

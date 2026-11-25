@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 
-Widget buildSlider(String label, int value, double maxValue, Function(double) onChanged) {
+/// A slider whose label shows the current value.
+Widget sliderRow(
+  String label,
+  int value,
+  double maxValue,
+  ValueChanged<double> onChanged,
+) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: TextStyle(color: Colors.white70)),
+      Text(label, style: const TextStyle(color: Colors.white70)),
       Slider(
         value: value.toDouble(),
         min: 1,
@@ -17,74 +23,150 @@ Widget buildSlider(String label, int value, double maxValue, Function(double) on
   );
 }
 
-Widget buildDropdown(String label, dynamic value, List<dynamic> items, Function(dynamic) onChanged) {
+/// A labelled dropdown, used for the settings that only accept fixed values.
+Widget dropdownRow<T>(
+  String label,
+  T value,
+  List<T> items,
+  ValueChanged<T?> onChanged,
+) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: TextStyle(color: Colors.white70)),
-      DropdownButton(
+      Text(label, style: const TextStyle(color: Colors.white70)),
+      DropdownButton<T>(
         value: value,
-        items: items.map((item) => DropdownMenuItem(
-            value: item,
-            child: Text(item.toString()),
-        )).toList(),
+        items: [
+          for (final item in items)
+            DropdownMenuItem<T>(value: item, child: Text(item.toString())),
+        ],
         onChanged: onChanged,
         dropdownColor: Colors.grey[850],
-        style: TextStyle(color: Colors.white),
+        style: const TextStyle(color: Colors.white),
       ),
     ],
   );
 }
 
-Widget buildTextField(String label, TextEditingController controller) {
+/// A masked input for credentials.
+Widget secretField(String label, TextEditingController controller) {
   return TextField(
     controller: controller,
     obscureText: true,
     decoration: InputDecoration(
       labelText: label,
-      labelStyle: TextStyle(color: Colors.white70),
-      enabledBorder: OutlineInputBorder(
+      labelStyle: const TextStyle(color: Colors.white70),
+      enabledBorder: const OutlineInputBorder(
         borderSide: BorderSide(color: Colors.white30),
       ),
-      focusedBorder: OutlineInputBorder(
+      focusedBorder: const OutlineInputBorder(
         borderSide: BorderSide(color: Colors.blueAccent),
       ),
     ),
-    style: TextStyle(color: Colors.white),
+    style: const TextStyle(color: Colors.white),
   );
 }
 
-Widget buildBalanceInfo(double totalBalance, double availableBalance, double unrealizedProfit, int numberOfPositions) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: <Widget>[
-      _buildBalanceRow('Total Balance:', '\$${totalBalance.toStringAsFixed(2)}', Colors.white),
-      _buildBalanceRow('Available Balance:', '\$${availableBalance.toStringAsFixed(2)}', Colors.white),
-      _buildBalanceRow('Unrealized Profit:', '\$${unrealizedProfit.toStringAsFixed(4)}', unrealizedProfit >= 0 ? Colors.green : Colors.red),
-      _buildBalanceRow('Open Positions:', numberOfPositions.toString(), Colors.white),
-    ],
+/// Label on the left, action on the right.
+Widget labeledButtonRow({
+  required String label,
+  required String buttonText,
+  required IconData icon,
+  required VoidCallback onPressed,
+  Color? buttonColor,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 16),
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: ElevatedButton.icon(
+            onPressed: onPressed,
+            icon: Icon(icon, color: Colors.white),
+            label:
+                Text(buttonText, style: const TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: buttonColor ?? Colors.blue,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 5,
+            ),
+          ),
+        ),
+      ],
+    ),
   );
 }
 
-Widget _buildBalanceRow(String label, String value, Color color) {
+/// A number input on a rounded panel, paired with its label.
+///
+/// [isInteger] selects the keyboard and the validation rule, which is all that
+/// differed between the allocation and leverage fields.
+Widget numberFieldRow({
+  required String label,
+  required TextEditingController controller,
+  required bool isInteger,
+  required ValueChanged<String> onChanged,
+}) {
   return Row(
-    mainAxisAlignment: MainAxisAlignment.start, // Align everything to the start
     children: [
       Expanded(
-        flex: 4, // Give more space to the label
-        child: Text(
-          label,
-          style: TextStyle(color: Colors.white),
+        child: Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 16),
+          ),
         ),
       ),
       Expanded(
-        flex: 2, // Less space for the value
-        child: Text(
-          value,
-          style: TextStyle(color: color),
-          textAlign: TextAlign.right, // Align value to the right within its space
+        flex: 2,
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[800],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: TextFormField(
+              controller: controller,
+              keyboardType: TextInputType.numberWithOptions(
+                decimal: !isInteger,
+              ),
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                hintStyle: TextStyle(color: Colors.white54),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) return 'Required';
+                final parsed =
+                    isInteger ? int.tryParse(value) : double.tryParse(value);
+                return parsed == null ? 'Invalid number' : null;
+              },
+              onChanged: onChanged,
+            ),
+          ),
         ),
       ),
     ],
+  );
+}
+
+/// A short warning shown under a heading when required input is missing.
+Widget missingInputWarning(String message) {
+  return Text(
+    message,
+    style: const TextStyle(
+        fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red),
   );
 }

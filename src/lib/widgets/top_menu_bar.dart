@@ -1,250 +1,182 @@
-// ignore_for_file: avoid_print
+import 'dart:io' show Platform, exit;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:io' show Platform, exit;
 import 'package:pluto_menu_bar/pluto_menu_bar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../utils/log.dart';
+
+/// Menu across the top of the dashboard: portfolio actions, history, keys and
+/// the symbol the chart shows.
 class TopMenuBar extends StatefulWidget {
-  final VoidCallback onTrainPortfolio;
-  final VoidCallback onTrainModels;
+  const TopMenuBar({
+    super.key,
+    required this.onOptimizedPortfolio,
+    required this.onTradeHistory,
+    required this.onOptimizationSettings,
+    required this.onTrainPortfolio,
+    required this.onTrainSubparModels,
+    required this.onResetPortfolio,
+    required this.onResetSubparModels,
+    required this.onApiKeys,
+    required this.onToggleAutoTrade,
+    required this.onSymbolSelected,
+    required this.symbols,
+    required this.selectedSymbol,
+    required this.isAutoTrade,
+  });
+
   final VoidCallback onOptimizedPortfolio;
-  final VoidCallback onResetPortfolio;
-  final VoidCallback onResetModels;
   final VoidCallback onTradeHistory;
   final VoidCallback onOptimizationSettings;
-  // final VoidCallback onManualUpdate;
+  final VoidCallback onTrainPortfolio;
+  final VoidCallback onTrainSubparModels;
+  final VoidCallback onResetPortfolio;
+  final VoidCallback onResetSubparModels;
   final VoidCallback onApiKeys;
-  final VoidCallback onAutoTrade;
-  final Function(String) onSymbolSelected;
+  final VoidCallback onToggleAutoTrade;
+  final ValueChanged<String> onSymbolSelected;
+
   final List<String> symbols;
   final String selectedSymbol;
 
-  const TopMenuBar({
-      super.key,
-      required this.onTrainPortfolio,
-      required this.onTrainModels,
-      required this.onOptimizedPortfolio,
-      required this.onResetPortfolio,
-      required this.onResetModels,
-      required this.onOptimizationSettings,
-      required this.onTradeHistory,
-      // required this.onManualUpdate,
-      required this.onApiKeys,
-      required this.onAutoTrade,
-      required this.onSymbolSelected,
-      required this.symbols,
-      required this.selectedSymbol,
-  });
+  /// Controls the label of the auto-trade entry so the menu says what pressing
+  /// it will do.
+  final bool isAutoTrade;
+
+  static const String _upgradeUrl =
+      'https://buy.stripe.com/test_9AQ8yF0XIa1t4iQ3cc';
+  static const String _issuesUrl =
+      'https://github.com/OvermindGroup/Overmind/issues';
 
   @override
   State<TopMenuBar> createState() => _TopMenuBarState();
 }
 
 class _TopMenuBarState extends State<TopMenuBar> {
-  late final List<PlutoMenuItem> _menus;
-  String? selectedSymbol;
+  late String _selectedSymbol = widget.selectedSymbol;
+
+  /// Built once; the auto-trade entry is the only item whose label changes.
+  late List<PlutoMenuItem> _menus;
 
   @override
   void initState() {
     super.initState();
-    // Initialize selectedSymbol with the value passed from the parent widget
-    selectedSymbol = widget.selectedSymbol;
-    _menus = _makeMenus(context);
+    _menus = _buildMenus();
   }
 
   @override
   void didUpdateWidget(covariant TopMenuBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // If the parent updates the selectedSymbol, update it in this widget
     if (widget.selectedSymbol != oldWidget.selectedSymbol) {
-      setState(() {
-          selectedSymbol = widget.selectedSymbol;
-      });
+      setState(() => _selectedSymbol = widget.selectedSymbol);
+    }
+    if (widget.isAutoTrade != oldWidget.isAutoTrade) {
+      setState(() => _menus = _buildMenus());
     }
   }
 
-  void _onSymbolChanged(String? newValue) {
-    setState(() {
-        selectedSymbol = newValue; // Update local selectedSymbol
-    });
-    if (newValue != null) {
-      widget.onSymbolSelected(newValue); // Notify parent of the change
+  void _selectSymbol(String? symbol) {
+    if (symbol == null) return;
+    setState(() => _selectedSymbol = symbol);
+    widget.onSymbolSelected(symbol);
+  }
+
+  Future<void> _open(String url) async {
+    final uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      logError('opening a link', 'Could not launch $uri');
     }
   }
 
-  void message(context, String text) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-
-    final snackBar = SnackBar(
-      content: Text(text),
-    );
-
-    ScaffoldMessenger.of(context).showSnackBar(snackBar);
+  List<PlutoMenuItem> _buildMenus() {
+    return [
+      PlutoMenuItem(
+        title: 'Dashboard',
+        children: [
+          PlutoMenuItem(
+              title: 'Trading Dashboard', onTap: widget.onOptimizedPortfolio),
+          PlutoMenuItem(title: 'Trade History', onTap: widget.onTradeHistory),
+          PlutoMenuItem(
+            title: widget.isAutoTrade
+                ? 'Stop Automated Trading'
+                : 'Start Automated Trading',
+            onTap: widget.onToggleAutoTrade,
+          ),
+        ],
+      ),
+      PlutoMenuItem(
+        title: 'Training',
+        children: [
+          PlutoMenuItem(
+              title: 'Train Full Portfolio', onTap: widget.onTrainPortfolio),
+          PlutoMenuItem(
+              title: 'Train Subpar Models', onTap: widget.onTrainSubparModels),
+        ],
+      ),
+      PlutoMenuItem(
+        title: 'Reset',
+        children: [
+          PlutoMenuItem(
+              title: 'Reset Portfolio', onTap: widget.onResetPortfolio),
+          PlutoMenuItem(
+              title: 'Reset Subpar Models', onTap: widget.onResetSubparModels),
+        ],
+      ),
+      PlutoMenuItem(
+          title: 'Optimization Settings', onTap: widget.onOptimizationSettings),
+      PlutoMenuItem(title: 'API Keys', onTap: widget.onApiKeys),
+      PlutoMenuItem(
+          title: 'Go PRO', onTap: () => _open(TopMenuBar._upgradeUrl)),
+      PlutoMenuItem(
+          title: 'Report Issue', onTap: () => _open(TopMenuBar._issuesUrl)),
+      PlutoMenuItem(
+        title: 'Exit',
+        onTap: () {
+          if (Platform.isAndroid) {
+            SystemNavigator.pop();
+          } else if (Platform.isWindows || Platform.isMacOS) {
+            exit(0);
+          }
+        },
+      ),
+    ];
   }
 
-  void _showComingSoon(BuildContext context) {
-    final snackBar = SnackBar(
-      content: Text('Coming Soon'),
-      duration: Duration(seconds: 2),
-    );
-    ScaffoldMessenger.of(context).showSnackBar(snackBar);
-  }
-
-  Widget _buildSymbolsDropdown() {
+  Widget _symbolDropdown() {
     return Container(
       decoration: BoxDecoration(
-        color: Color(0xFF141218), // Dark background color
+        color: _background,
         borderRadius: BorderRadius.circular(4),
       ),
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: DropdownButton<String>(
-          value: selectedSymbol,
-          hint: Text('BTCUSDT', style: TextStyle(color: Colors.white)),
-          dropdownColor: Color(0xFF141218),
-          style: TextStyle(color: Colors.white),
-          icon: Icon(Icons.arrow_drop_down, color: Colors.white),
-          underline: SizedBox(), // Removes the default underline
-          isExpanded: true, // Makes the button take full width of its parent
-          onChanged: _onSymbolChanged, // Call the change handler
-          items: widget.symbols.map<DropdownMenuItem<String>>((String value) {
-              return DropdownMenuItem<String>(
-                value: value,
+          value: _selectedSymbol,
+          hint: const Text('BTCUSDT', style: TextStyle(color: Colors.white)),
+          dropdownColor: _background,
+          style: const TextStyle(color: Colors.white),
+          icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+          underline: const SizedBox(),
+          isExpanded: true,
+          onChanged: _selectSymbol,
+          items: [
+            for (final symbol in widget.symbols)
+              DropdownMenuItem<String>(
+                value: symbol,
                 child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text(value),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(symbol),
                 ),
-              );
-          }).toList(),
+              ),
+          ],
         ),
       ),
     );
   }
 
-  List<PlutoMenuItem> _makeMenus(BuildContext context) {
-    return [
-      PlutoMenuItem(
-        title: 'Trading Dashboard',
-        onTap: widget.onOptimizedPortfolio,
-      ),
-      PlutoMenuItem(
-        title: 'Trade History',
-        onTap: widget.onTradeHistory,
-      ),
-      // PlutoMenuItem(
-      //   title: 'Current Portfolio',
-      //   children: [
-      //     PlutoMenuItem(
-      //       title: 'Open Positions',
-      //       onTap: widget.onPositions,
-      //     ),
-      //     // PlutoMenuItem.widget(widget: Text(),) ! Disabled
-      //     PlutoMenuItem(
-      //       title: 'Trade History',
-      //       onTap: widget.onTradeHistory,
-      //     ),
-      //   ],
-      // ),
-      // PlutoMenuItem(
-      //   title: 'Portfolio Optimization',
-      //   children: [
-      //     PlutoMenuItem(
-      //       title: 'Visualization',
-      //       children: [
-      //         PlutoMenuItem(
-      //           title: 'Show Portfolio',
-      //           onTap: widget.onOptimizedPortfolio,
-      //         ),
-      //       ],
-      //     ),
-      //     PlutoMenuItem(
-      //       title: 'Training',
-      //       children: [
-      //         PlutoMenuItem(
-      //           title: 'Train Full Portfolio',
-      //           onTap: widget.onTrainPortfolio,
-      //         ),
-      //         PlutoMenuItem(
-      //           title: 'Train Subpar Models',
-      //           onTap: widget.onTrainModels,
-      //         ),
-      //       ],
-      //     ),
-      //     PlutoMenuItem(
-      //       title: 'Reset',
-      //       children: [
-      //         PlutoMenuItem(
-      //           title: 'Reset Portfolio',
-      //           onTap: widget.onResetPortfolio,
-      //         ),
-      //         PlutoMenuItem(
-      //           title: 'Reset Subpar Models',
-      //           onTap: widget.onResetModels,
-      //         ),
-      //       ],
-      //     ),
-      //     PlutoMenuItem(
-      //       title: 'Settings',
-      //       onTap: widget.onOptimizationSettings,
-      //     ),
-      //   ],
-      // ),
-      // PlutoMenuItem(
-      //   title: 'Update Portfolio',
-      //   children: [
-      //     PlutoMenuItem(
-      //       title: 'Trade Once',
-      //       onTap: widget.onManualUpdate,
-      //     ),
-      //     // PlutoMenuItem.widget(
-      //     //   widget: Text('Automated Updating')
-      //     // ),
-      //     PlutoMenuItem(
-      //       title: 'Toggle Automated Trading',
-      //       onTap: widget.onAutoTrade,
-      //     ),
-      //   ],
-      // ),
-      PlutoMenuItem(
-        title: 'API Keys',
-        onTap: widget.onApiKeys,
-      ),
-      PlutoMenuItem(
-        title: 'Go PRO',
-        onTap: () async {
-          const url = 'https://buy.stripe.com/test_9AQ8yF0XIa1t4iQ3cc';
-          if (await canLaunchUrl(Uri.parse(url))) {
-            await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-          } else {
-            print('Could not launch $url');
-          }
-        },
-      ),
-      PlutoMenuItem(
-        title: 'Report Issue',
-        onTap: () async {
-          const url = 'https://github.com/OvermindGroup/Overmind/issues';
-          if (await canLaunchUrl(Uri.parse(url))) {
-            await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-          } else {
-            print('Could not launch $url');
-          }
-        },
-      ),
-      PlutoMenuItem(
-        title: 'Exit',
-        onTap: () async {
-          if (Platform.isAndroid) {
-              SystemNavigator.pop();
-            } else if (Platform.isWindows || Platform.isMacOS) {
-              exit(0);
-            }
-        },
-      ),
-    ];
-  }
+  static const Color _background = Color(0xFF141218);
 
   @override
   Widget build(BuildContext context) {
@@ -258,7 +190,7 @@ class _TopMenuBarState extends State<TopMenuBar> {
               alignment: Alignment.centerRight,
               child: PlutoMenuBar(
                 mode: PlutoMenuBarMode.hover,
-                backgroundColor: Color(0xFF141218),
+                backgroundColor: _background,
                 itemStyle: const PlutoMenuItemStyle(
                   activatedColor: Colors.white,
                   indicatorColor: Colors.deepOrange,
@@ -267,14 +199,14 @@ class _TopMenuBarState extends State<TopMenuBar> {
                   moreIconColor: Colors.white,
                 ),
                 menus: _menus,
-              )
-            )
+              ),
+            ),
           ),
-          SizedBox(width: 16),
-          SizedBox(width: 160, child: _buildSymbolsDropdown()),
-          SizedBox(width: 16),
-        ]
-      )
+          const SizedBox(width: 16),
+          SizedBox(width: 160, child: _symbolDropdown()),
+          const SizedBox(width: 16),
+        ],
+      ),
     );
   }
 }
